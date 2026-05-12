@@ -1,0 +1,24 @@
+[project]
+name = "sdgolf-monitor"
+version = "0.1.0"
+description = "Monitor San Diego city golf tee times and email when matches appear"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+sdgolf-monitor = "sdgolf_monitor.main:cli"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

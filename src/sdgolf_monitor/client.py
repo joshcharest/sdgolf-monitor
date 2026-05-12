@@ -1,0 +1,160 @@
+"""Minimal ForeUp HTTP client for San Diego City Golf.
+
+ForeUp's online booking is a SPA backed by a JSON API. The bundle hardcodes
+``api_key=no_limits`` for unauthenticated browser sessions. San Diego City Golf
+additionally requires a logged-in session (cookie + JWT) before the times
+endpoint will return non-``false`` results.
+
+Discovery notes:
+- Each physical course is a separate ``teesheet_id``. The times endpoint takes
+  this value in its ``schedule_id`` query param (yes, the naming is confusing).
+- ``booking_class`` must be one the logged-in user is entitled to (see the
+  ``booking_class_ids`` field of the login response). Different classes
+  represent different rate plans / booking windows (e.g. resident 7-day vs
+  Torrey 8-90-day).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import requests
+
+BASE = "https://foreupsoftware.com"
+
+
+@dataclass(frozen=True)
+class Target:
+    """A specific (course, booking_class) pair to monitor."""
+    name: str           # human-readable, e.g. "Balboa Park 18"
+    teesheet_id: int    # the course's teesheet (passed as schedule_id to the API)
+    booking_class: int  # account-allowed booking class
+
+
+@dataclass(frozen=True)
+class TeeTime:
+    target: str          # Target.name
+    date: str            # "YYYY-MM-DD"
+    time: str            # "HH:MM" 24h, course-local
+    available_spots: int
+    holes: int
+    green_fee: float | None
+    booking_fee: float | None
+
+    @property
+    def key(self) -> str:
+        return f"{self.target}|{self.date}|{self.time}|{self.holes}"
+
+
+class ForeUpAuthError(RuntimeError):
+    pass
+
+
+class ForeUpClient:
+    """Authenticated HTTP client for the ForeUp booking API."""
+
+    def __init__(self, primary_course_id: int = 19348):
+        self.primary_course_id = primary_course_id
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest",
+            "Api-Key": "no_limits",
+        })
+        self.user: dict[str, Any] | None = None
+
+    def login(self, username: str, password: str, booking_class: int = 929) -> dict[str, Any]:
+        """Authenticate. Returns the user object (includes booking_class_ids, jwt).
+
+        ``booking_class`` here is only used to satisfy the login form; the same
+        cookie/JWT then unlocks every booking class the user is entitled to.
+        """
+        self.session.get(
+            f"{BASE}/index.php/booking/{self.primary_course_id}/{booking_class}",
+            timeout=20,
+        )
+        resp = self.session.post(
+            f"{BASE}/index.php/api/booking/users/login",
+            data={
+                "username": username,
+                "password": password,
+                "booking_class_id": booking_class,
+                "api_key": "no_limits",
+                "course_id": self.primary_course_id,
+            },
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            raise ForeUpAuthError(f"login http {resp.status_code}: {resp.text[:200]}")
+        try:
+            body = resp.json()
+        except ValueError:
+            raise ForeUpAuthError(f"login non-JSON: {resp.text[:200]}")
+        if not isinstance(body, dict) or body.get("success") is False or body.get("status") is False:
+            raise ForeUpAuthError(f"login rejected: {body}")
+        jwt = body.get("jwt")
+        if jwt:
+            self.session.headers["X-Authorization"] = f"Bearer {jwt}"
+        self.user = body
+        return body
+
+    def get_times(self, target: Target, date: str, holes: int = 18) -> list[TeeTime]:
+        """Fetch tee times for a target on a given date.
+
+        Args:
+            target: Course + booking class to query.
+            date: "YYYY-MM-DD".
+            holes: 9 or 18.
+        """
+        y, m, d = date.split("-")
+        params = {
+            "time": "all",
+            "date": f"{m}-{d}-{y}",
+            "holes": holes,
+            "players": 0,
+            "booking_class": target.booking_class,
+            "schedule_id": target.teesheet_id,
+            "schedule_ids[]": target.teesheet_id,
+            "specials_only": 0,
+            "api_key": "no_limits",
+        }
+        resp = self.session.get(
+            f"{BASE}/index.php/api/booking/times",
+            params=params,
+            timeout=20,
+        )
+        resp.raise_for_status()
+        try:
+            body = resp.json()
+        except ValueError:
+            return []
+        if not isinstance(body, list):
+            if isinstance(body, dict) and body.get("status") is False:
+                raise ForeUpAuthError(f"api rejected: {body}")
+            return []
+        return [_record_to_teetime(r, target.name) for r in body]
+
+
+def _record_to_teetime(r: dict[str, Any], target_name: str) -> TeeTime:
+    ts = r.get("time", "")
+    date, time = (ts.split(" ", 1) + [""])[:2] if " " in ts else (ts, "")
+    return TeeTime(
+        target=target_name,
+        date=date,
+        time=time[:5],
+        available_spots=int(r.get("available_spots", 0) or 0),
+        holes=int(r.get("holes", 18) or 18),
+        green_fee=_to_float(r.get("green_fee")),
+        booking_fee=_to_float(r.get("booking_fee_price")) if r.get("booking_fee_required") else None,
+    )
+
+
+def _to_float(v: Any) -> float | None:
+    if v in (None, "", False):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None

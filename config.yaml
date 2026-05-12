@@ -1,0 +1,41 @@
+# sdgolf-monitor configuration.
+#
+# `targets` is a list of (course, booking_class) pairs to query each run.
+# `dates` is the inclusive YYYY-MM-DD range to scan every pass.
+# `filter` is the criteria a tee time must satisfy to trigger an email.
+#
+# To discover the right booking_class for your account, run:
+#   python -m sdgolf_monitor.discover
+# (it prints your booking_class_ids and each teesheet's slot count under each class).
+
+targets:
+  # Near-term (0-7 days out) — Balboa free booking under the resident program
+  - name: Balboa Park 18 (≤7d)
+    teesheet_id: 1470
+    booking_class: 929
+  # Far-term (8-90 days out) — paid resident booking window
+  - name: Balboa Park 18 (8-90d)
+    teesheet_id: 1470
+    booking_class: 51735
+  - name: Torrey Pines North
+    teesheet_id: 1468
+    booking_class: 51735
+  - name: Torrey Pines South
+    teesheet_id: 1487
+    booking_class: 51735
+
+dates:
+  start: "2026-05-13"
+  end: "2026-08-12"
+
+filter:
+  holes: 18
+  min_players: 2
+  max_green_fee: 250  # null to disable; Torrey South is ~$258-322 nonresident
+  windows:
+    - start: "07:00"
+      end: "11:00"
+      weekdays: [sat, sun]
+    - start: "15:00"
+      end: "18:30"
+      weekdays: [mon, tue, wed, thu, fri]
