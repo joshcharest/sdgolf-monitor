@@ -24,18 +24,27 @@ targets:
     teesheet_id: 1487
     booking_class: 51735
 
+# Sliding window — `today` and `today+N` resolve at run time, so this stays
+# fresh without edits. The ForeUp API only exposes ~90 days out for Torrey
+# and ~7 days for Balboa under the resident class.
 dates:
-  start: "2026-05-13"
-  end: "2026-08-12"
+  start: today
+  end: today+90
 
 filter:
   holes: 18
   min_players: 2
-  max_green_fee: 250  # null to disable; Torrey South is ~$258-322 nonresident
+  max_green_fee: null   # set to a dollar cap if you want one; null = no cap
   windows:
-    - start: "07:00"
-      end: "11:00"
+    # Weekend mornings — prime tee times, the main thing worth waking up to email about
+    - start: "06:30"
+      end: "11:30"
       weekdays: [sat, sun]
+    # Friday afternoon — half-day-friday play
+    - start: "13:00"
+      end: "17:30"
+      weekdays: [fri]
+    # Mid-week afternoons (everything fills up Sat anyway)
     - start: "15:00"
       end: "18:30"
-      weekdays: [mon, tue, wed, thu, fri]
+      weekdays: [mon, tue, wed, thu]

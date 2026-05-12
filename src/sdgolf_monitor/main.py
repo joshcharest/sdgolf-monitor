@@ -66,8 +66,21 @@ def main(config_path: Path, state_path: Path, *, dry_run: bool = False) -> int:
             log.info("%s %s: %d total, %d match", target.name, d, len(times), len(hits))
             matches.extend(hits)
 
+    # First-run behavior: if there is no state file yet, seed it with whatever
+    # is currently visible and exit without emailing. Without this, the first
+    # cron run would email a digest of every currently-available slot.
+    first_run = not state_path.exists()
     seen = state.load(state_path)
     new = [t for t in matches if state.mark(seen, t.key)]
+
+    if first_run:
+        log.info(
+            "first run — seeding state with %d match(es); no email sent",
+            len(new),
+        )
+        if not dry_run:
+            state.save(state_path, seen)
+        return 0
 
     if not new:
         log.info("no new matches (%d total matches already known)", len(matches))

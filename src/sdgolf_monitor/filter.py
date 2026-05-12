@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -40,12 +41,26 @@ class Filter:
         return any(w.matches(tt.date, tt.time) for w in self.windows)
 
 
-def date_range(start: str, end: str) -> list[str]:
-    """Inclusive YYYY-MM-DD range."""
-    s = date.fromisoformat(start)
-    e = date.fromisoformat(end)
+_RELATIVE_RE = re.compile(r"^today\s*([+-]\s*\d+)?$")
+
+
+def resolve_date(spec: str, today: date | None = None) -> date:
+    """Resolve a config date string. Accepts ``YYYY-MM-DD`` or ``today[±N]``."""
+    today = today or date.today()
+    s = spec.strip().lower()
+    m = _RELATIVE_RE.match(s)
+    if m:
+        offset = int((m.group(1) or "0").replace(" ", ""))
+        return today + timedelta(days=offset)
+    return date.fromisoformat(spec)
+
+
+def date_range(start: str, end: str, *, today: date | None = None) -> list[str]:
+    """Inclusive date range. Accepts ISO dates or ``today[±N]`` shorthand."""
+    s = resolve_date(start, today)
+    e = resolve_date(end, today)
     if e < s:
-        raise ValueError(f"end {end} before start {start}")
+        raise ValueError(f"end {end} resolves before start {start}")
     return [(s + timedelta(days=i)).isoformat() for i in range((e - s).days + 1)]
 
 

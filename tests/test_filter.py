@@ -1,5 +1,9 @@
+from datetime import date
+
+import pytest
+
 from sdgolf_monitor.client import TeeTime
-from sdgolf_monitor.filter import Filter, Window, date_range, parse_weekdays
+from sdgolf_monitor.filter import Filter, Window, date_range, parse_weekdays, resolve_date
 
 
 def tt(date="2026-06-06", time="08:00", spots=4, holes=18, fee=50.0):
@@ -66,3 +70,29 @@ def test_state_key_unique_per_target_date_time_holes():
     a = tt(time="08:00")
     b = tt(time="08:30")
     assert a.key != b.key
+
+
+def test_resolve_date_iso_and_relative():
+    today = date(2026, 5, 12)
+    assert resolve_date("2026-06-01", today) == date(2026, 6, 1)
+    assert resolve_date("today", today) == today
+    assert resolve_date("today+0", today) == today
+    assert resolve_date("today+7", today) == date(2026, 5, 19)
+    assert resolve_date("today-1", today) == date(2026, 5, 11)
+    assert resolve_date("TODAY + 90", today) == date(2026, 8, 10)
+
+
+def test_resolve_date_rejects_garbage():
+    with pytest.raises(ValueError):
+        resolve_date("yesterday")
+
+
+def test_date_range_accepts_relative():
+    today = date(2026, 5, 12)
+    r = date_range("today", "today+2", today=today)
+    assert r == ["2026-05-12", "2026-05-13", "2026-05-14"]
+
+
+def test_date_range_end_before_start_errors():
+    with pytest.raises(ValueError):
+        date_range("today+5", "today", today=date(2026, 5, 12))
