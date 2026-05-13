@@ -35,9 +35,19 @@ A web UI for managing check sets is also published to GitHub Pages.
    | `NOTIFY_TO` | where alerts go |
 
 3. **Enable Actions** — the `monitor` workflow runs every 5 minutes.
-4. **Enable GitHub Pages** — Settings → Pages → Source: **GitHub Actions**.
-   The `pages` workflow publishes `ui/` to
-   `https://<owner>.github.io/sdgolf-monitor/` whenever `ui/**` changes.
+4. **Host the UI on Cloudflare Pages** (free, supports private repos):
+   1. Visit https://dash.cloudflare.com/ → Workers &amp; Pages → Create →
+      Pages → Connect to Git.
+   2. Authorize Cloudflare to read this repo only.
+   3. Create project. **Build settings**: framework preset = *None*,
+      build command = leave empty, build output directory = `ui`.
+   4. Deploy. The UI is then served at
+      `https://sdgolf-monitor.pages.dev/`. Cloudflare auto-redeploys
+      on every push to `main` that touches `ui/**`.
+
+   The UI never leaves the Cloudflare CDN; nothing in your repo becomes
+   public. The UI talks directly to `api.github.com` from your browser
+   using a PAT you paste in once (saved to localStorage).
 
 ## Managing check sets
 
