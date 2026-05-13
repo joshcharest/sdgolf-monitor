@@ -1,0 +1,20 @@
+enabled: true
+description: "Torrey Pines South — Sat/Sun 8am-3pm foursomes, 0-7 days out"
+
+targets:
+  - name: Torrey Pines South
+    teesheet_id: 1487
+    booking_class: 929
+
+dates:
+  start: today
+  end: today+7
+
+filter:
+  holes: 18
+  min_players: 4
+  max_green_fee: null
+  windows:
+    - start: "08:00"
+      end: "15:00"
+      weekdays: [sat, sun]
