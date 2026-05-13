@@ -35,7 +35,7 @@ A web UI for managing check sets is also published to GitHub Pages.
    | `GMAIL_APP_PASSWORD` | 16-char Gmail app password |
    | `NOTIFY_TO` | where alerts go |
 
-3. **Enable Actions** — the `monitor` workflow runs every 10 minutes.
+3. **Enable Actions** — the `monitor` workflow runs every 5 minutes.
 4. **Host the UI on Cloudflare Pages** (free, supports private repos):
    1. Visit https://dash.cloudflare.com/ → Workers &amp; Pages → Create →
       Pages → Connect to Git.
