@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>sdgolf-monitor</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>sdgolf-monitor</h1>
+    <nav>
+      <button id="new-btn" type="button" hidden>＋ New check set</button>
+      <a id="repo-link" href="https://github.com/joshcharest/sdgolf-monitor" target="_blank" rel="noopener">repo ↗</a>
+      <button id="signout-btn" type="button" hidden>Sign out</button>
+    </nav>
+  </header>
+
+  <main id="root">
+    <!-- views are rendered into here -->
+    <p class="loading">Loading…</p>
+  </main>
+
+  <template id="auth-view">
+    <section class="card auth">
+      <h2>One-time setup</h2>
+      <p>
+        This page reads and writes
+        <code>configs/*.yaml</code> in
+        <a href="https://github.com/joshcharest/sdgolf-monitor" target="_blank" rel="noopener">joshcharest/sdgolf-monitor</a>
+        directly through the GitHub REST API. Paste a fine-grained personal
+        access token below. It's stored in this browser's localStorage and
+        never sent anywhere except <code>api.github.com</code>.
+      </p>
+      <ol>
+        <li>
+          Visit
+          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">
+            github.com/settings/personal-access-tokens/new
+          </a>
+        </li>
+        <li>Resource owner: <strong>joshcharest</strong>. Repository access: only <strong>sdgolf-monitor</strong>.</li>
+        <li>Repository permissions: <strong>Contents → Read &amp; write</strong>. Nothing else.</li>
+        <li>Generate, copy the <code>github_pat_…</code> token, paste here.</li>
+      </ol>
+      <form id="auth-form">
+        <input type="password" id="pat-input" placeholder="github_pat_…" autocomplete="off" required />
+        <button type="submit">Save token</button>
+      </form>
+      <p class="error" id="auth-error" hidden></p>
+    </section>
+  </template>
+
+  <template id="list-view">
+    <section id="list-section">
+      <div class="cards" id="cards"></div>
+      <p class="hint" id="cards-empty" hidden>No check sets yet — click "＋ New check set" to create one.</p>
+    </section>
+  </template>
+
+  <template id="card">
+    <article class="card check-card">
+      <header>
+        <h3 class="card-name"></h3>
+        <label class="toggle">
+          <input type="checkbox" class="enabled-toggle" />
+          <span></span>
+        </label>
+      </header>
+      <p class="card-desc"></p>
+      <ul class="card-meta">
+        <li class="card-targets"></li>
+        <li class="card-dates"></li>
+        <li class="card-filter"></li>
+      </ul>
+      <footer>
+        <button type="button" class="edit-btn">Edit</button>
+      </footer>
+    </article>
+  </template>
+
+  <template id="edit-view">
+    <section class="card edit">
+      <h2 id="edit-title"></h2>
+      <form id="edit-form">
+        <label>
+          Name <small>(used as the filename)</small>
+          <input type="text" name="name" pattern="[a-z0-9][a-z0-9-]*" required />
+        </label>
+        <label class="inline">
+          <input type="checkbox" name="enabled" checked />
+          Enabled
+        </label>
+        <label>
+          Description <small>(optional)</small>
+          <textarea name="description" rows="2"></textarea>
+        </label>
+
+        <fieldset>
+          <legend>Targets</legend>
+          <div id="targets-list"></div>
+          <button type="button" id="add-target">＋ Add target</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Date range</legend>
+          <label class="inline">Start <input type="text" name="date-start" placeholder="today or 2026-06-01" required /></label>
+          <label class="inline">End   <input type="text" name="date-end" placeholder="today+90 or 2026-09-01" required /></label>
+          <p class="hint">Accepts ISO dates or <code>today</code> / <code>today+N</code> / <code>today-N</code>.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Filter</legend>
+          <div class="row">
+            <label class="inline">
+              Holes
+              <select name="holes">
+                <option value="18" selected>18</option>
+                <option value="9">9</option>
+              </select>
+            </label>
+            <label class="inline">
+              Min players
+              <input type="number" name="min-players" min="1" max="4" value="2" />
+            </label>
+            <label class="inline">
+              Max green fee
+              <input type="number" name="max-fee" min="0" step="1" placeholder="no cap" />
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Time windows <small>(any window may match)</small></legend>
+          <div id="windows-list"></div>
+          <button type="button" id="add-window">＋ Add window</button>
+        </fieldset>
+
+        <footer class="edit-footer">
+          <button type="submit" class="primary">Save</button>
+          <button type="button" id="cancel-btn">Cancel</button>
+          <button type="button" id="delete-btn" class="danger" hidden>Delete</button>
+        </footer>
+      </form>
+      <p class="error" id="edit-error" hidden></p>
+    </section>
+  </template>
+
+  <template id="target-row">
+    <div class="target-row">
+      <input type="text" class="t-name" placeholder="Display name" required />
+      <select class="t-teesheet"></select>
+      <input type="number" class="t-teesheet-custom" placeholder="custom id" hidden />
+      <select class="t-class"></select>
+      <input type="number" class="t-class-custom" placeholder="custom id" hidden />
+      <button type="button" class="t-del" title="Remove target">✕</button>
+    </div>
+  </template>
+
+  <template id="window-row">
+    <div class="window-row">
+      <input type="time" class="w-start" required />
+      <span>→</span>
+      <input type="time" class="w-end" required />
+      <div class="weekdays">
+        <label><input type="checkbox" value="mon" />Mon</label>
+        <label><input type="checkbox" value="tue" />Tue</label>
+        <label><input type="checkbox" value="wed" />Wed</label>
+        <label><input type="checkbox" value="thu" />Thu</label>
+        <label><input type="checkbox" value="fri" />Fri</label>
+        <label><input type="checkbox" value="sat" />Sat</label>
+        <label><input type="checkbox" value="sun" />Sun</label>
+      </div>
+      <button type="button" class="w-del" title="Remove window">✕</button>
+    </div>
+  </template>
+
+  <div id="toast" hidden></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+enabled: true
+description: "Balboa Park 18-hole + Torrey Pines, weekend mornings & weekday afternoons"
+
+targets:
+  # Near-term (0-7 days out) — resident free booking window
+  - name: Balboa Park 18 (≤7d)
+    teesheet_id: 1470
+    booking_class: 929
+  # Far-term (8-90 days out) — paid resident booking window
+  - name: Balboa Park 18 (8-90d)
+    teesheet_id: 1470
+    booking_class: 51735
+  - name: Torrey Pines North
+    teesheet_id: 1468
+    booking_class: 51735
+  - name: Torrey Pines South
+    teesheet_id: 1487
+    booking_class: 51735
+
+dates:
+  start: today
+  end: today+90
+
+filter:
+  holes: 18
+  min_players: 2
+  max_green_fee: null
+  windows:
+    - start: "06:30"
+      end: "11:30"
+      weekdays: [sat, sun]
+    - start: "13:00"
+      end: "17:30"
+      weekdays: [fri]
+    - start: "15:00"
+      end: "18:30"
+      weekdays: [mon, tue, wed, thu]

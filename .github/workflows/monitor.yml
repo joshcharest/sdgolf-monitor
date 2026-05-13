@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false  # don't kill a run mid-flight; queue the next one
 
 permissions:
-  contents: write   # needed to commit state.json back
+  contents: write   # needed to commit state/ updates back
 
 jobs:
   check:
@@ -33,16 +33,16 @@ jobs:
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
-        run: python -m sdgolf_monitor.main --config config.yaml --state state.json
+        run: python -m sdgolf_monitor.main
 
       - name: Commit updated state
         run: |
-          if git diff --quiet -- state.json; then
+          if [ -z "$(git status --porcelain state)" ]; then
             echo "state unchanged"
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state.json
+          git add state
           git commit -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push

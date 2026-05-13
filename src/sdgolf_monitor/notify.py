@@ -14,19 +14,22 @@ def send_email(
     smtp_user: str,
     smtp_password: str,
     to_addr: str,
+    set_name: str,
     new_times: list[TeeTime],
 ) -> None:
-    """Send a single digest email covering all newly-seen tee times.
+    """Send a digest email for one check set's new matches.
 
-    Raises smtplib.SMTPException on transport failure (caller decides whether to
-    fall back to leaving state unmarked so the slots re-notify next run).
+    The ``set_name`` is tagged into the subject so Gmail filters can route each
+    check set's notifications independently.
+
+    Raises smtplib.SMTPException on transport failure.
     """
     if not new_times:
         return
     msg = EmailMessage()
     msg["From"] = smtp_user
     msg["To"] = to_addr
-    msg["Subject"] = _subject(new_times)
+    msg["Subject"] = _subject(set_name, new_times)
     msg.set_content(_plaintext(new_times))
     msg.add_alternative(_html(new_times), subtype="html")
 
@@ -35,9 +38,9 @@ def send_email(
         smtp.send_message(msg)
 
 
-def _subject(new_times: list[TeeTime]) -> str:
+def _subject(set_name: str, new_times: list[TeeTime]) -> str:
     targets = sorted({t.target for t in new_times})
-    return f"[sdgolf] {len(new_times)} tee time(s) — {', '.join(targets)}"
+    return f"[sdgolf:{set_name}] {len(new_times)} tee time(s) — {', '.join(targets)}"
 
 
 def _plaintext(new_times: list[TeeTime]) -> str:

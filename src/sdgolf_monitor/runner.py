@@ -1,0 +1,120 @@
+"""Run one check set: fetch tee times, diff against state, email new matches.
+
+Extracted from ``main.py`` so the orchestrator can loop over many config files
+while reusing a single ForeUp login.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from . import notify, state
+from .client import ForeUpClient, Target, TeeTime
+from .filter import Filter, Window, date_range, parse_weekdays
+
+log = logging.getLogger("sdgolf")
+
+
+@dataclass(frozen=True)
+class SmtpCreds:
+    user: str
+    password: str
+    to_addr: str
+
+
+def run_check_set(
+    *,
+    client: ForeUpClient,
+    cfg: dict[str, Any],
+    state_path: Path,
+    set_name: str,
+    dry_run: bool,
+    smtp: SmtpCreds | None,
+) -> None:
+    """Run one config to completion. Caller handles exception isolation.
+
+    Args:
+        client: Already-logged-in ForeUp client; reused across check sets.
+        cfg: Parsed YAML config (see configs/*.yaml schema).
+        state_path: Where to read/write the dedup state for this set.
+        set_name: Used in log lines and the email subject.
+        dry_run: If True, never send email and never write state.
+        smtp: SMTP credentials. May be None only in dry_run mode.
+    """
+    targets = [
+        Target(
+            name=t["name"],
+            teesheet_id=int(t["teesheet_id"]),
+            booking_class=int(t["booking_class"]),
+        )
+        for t in cfg["targets"]
+    ]
+    flt = Filter(
+        min_players=int(cfg["filter"].get("min_players", 1)),
+        max_green_fee=cfg["filter"].get("max_green_fee"),
+        holes=int(cfg["filter"].get("holes", 18)),
+        windows=tuple(
+            Window(
+                start=w["start"],
+                end=w["end"],
+                weekdays=parse_weekdays(w.get("weekdays")),
+            )
+            for w in cfg["filter"]["windows"]
+        ),
+    )
+    dates = date_range(cfg["dates"]["start"], cfg["dates"]["end"])
+
+    matches: list[TeeTime] = []
+    for target in targets:
+        for d in dates:
+            try:
+                times = client.get_times(target, d, holes=flt.holes)
+            except Exception:
+                log.exception("[%s] failed to fetch %s on %s", set_name, target.name, d)
+                continue
+            hits = [t for t in times if flt.matches(t)]
+            log.info(
+                "[%s] %s %s: %d total, %d match",
+                set_name, target.name, d, len(times), len(hits),
+            )
+            matches.extend(hits)
+
+    # First-run behavior: seed silently. Without this, the first cron pass
+    # would email a digest of every currently-available slot.
+    first_run = not state_path.exists()
+    seen = state.load(state_path)
+    new = [t for t in matches if state.mark(seen, t.key)]
+
+    if first_run:
+        log.info(
+            "[%s] first run — seeding state with %d match(es); no email sent",
+            set_name, len(new),
+        )
+        if not dry_run:
+            state.save(state_path, seen)
+        return
+
+    if not new:
+        log.info("[%s] no new matches (%d already known)", set_name, len(matches))
+        if not dry_run:
+            state.save(state_path, seen)
+        return
+
+    log.info("[%s] found %d new tee time(s)", set_name, len(new))
+    if dry_run:
+        log.info("[%s] DRY RUN — would email subject %r", set_name, notify._subject(set_name, new))
+        return
+
+    if smtp is None:
+        raise RuntimeError("smtp creds required for non-dry-run with new matches")
+    notify.send_email(
+        smtp_user=smtp.user,
+        smtp_password=smtp.password,
+        to_addr=smtp.to_addr,
+        set_name=set_name,
+        new_times=new,
+    )
+    state.save(state_path, seen)
