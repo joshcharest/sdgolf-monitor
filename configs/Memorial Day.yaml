@@ -13,7 +13,9 @@ dates:
   start: '2026-05-25'
   end: '2026-05-25'
 filter:
-  holes: 18
+  holes:
+    - 9
+    - 18
   min_players: 1
   max_green_fee: null
   windows:
