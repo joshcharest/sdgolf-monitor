@@ -13,7 +13,7 @@ from typing import Any
 
 from . import notify, state
 from .client import ForeUpClient, Target, TeeTime
-from .filter import Filter, Window, date_range, parse_weekdays
+from .filter import Filter, Window, date_range, parse_holes, parse_weekdays
 
 log = logging.getLogger("sdgolf")
 
@@ -55,7 +55,7 @@ def run_check_set(
     flt = Filter(
         min_players=int(cfg["filter"].get("min_players", 1)),
         max_green_fee=cfg["filter"].get("max_green_fee"),
-        holes=int(cfg["filter"].get("holes", 18)),
+        holes=parse_holes(cfg["filter"].get("holes")),
         windows=tuple(
             Window(
                 start=w["start"],
@@ -70,17 +70,18 @@ def run_check_set(
     matches: list[TeeTime] = []
     for target in targets:
         for d in dates:
-            try:
-                times = client.get_times(target, d, holes=flt.holes)
-            except Exception:
-                log.exception("[%s] failed to fetch %s on %s", set_name, target.name, d)
-                continue
-            hits = [t for t in times if flt.matches(t)]
-            log.info(
-                "[%s] %s %s: %d total, %d match",
-                set_name, target.name, d, len(times), len(hits),
-            )
-            matches.extend(hits)
+            for h in flt.holes:
+                try:
+                    times = client.get_times(target, d, holes=h)
+                except Exception:
+                    log.exception("[%s] failed to fetch %s on %s (%dh)", set_name, target.name, d, h)
+                    continue
+                hits = [t for t in times if flt.matches(t)]
+                log.info(
+                    "[%s] %s %s %dh: %d total, %d match",
+                    set_name, target.name, d, h, len(times), len(hits),
+                )
+                matches.extend(hits)
 
     # First-run behavior: seed silently. Without this, the first cron pass
     # would email a digest of every currently-available slot.

@@ -54,7 +54,8 @@ main {
 .check-card header { padding: 0; border: none; background: none; display: flex; justify-content: space-between; align-items: center; }
 .check-card h3 { margin: 0; font-size: 16px; }
 .check-card.disabled h3 { color: var(--text-dim); text-decoration: line-through; }
-.check-card .card-desc { color: var(--text-dim); font-size: 14px; margin: 0; min-height: 1.5em; }
+.check-card .card-desc { color: var(--text-dim); font-size: 14px; margin: 0; }
+.check-card .card-desc:empty { display: none; }
 .check-card ul { list-style: none; padding: 0; margin: 0; font-size: 13px; color: var(--text-dim); }
 .check-card ul li { padding: 2px 0; }
 .check-card footer { padding: 0; border: none; }
@@ -99,16 +100,61 @@ form fieldset legend { padding: 0 6px; color: var(--text-dim); font-size: 13px; 
 form .row { display: flex; flex-wrap: wrap; gap: 12px; }
 form .hint { color: var(--text-dim); font-size: 12px; margin: 6px 0 0 0; }
 
-.target-row, .window-row {
+.window-row {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   padding: 8px 0; border-bottom: 1px dashed var(--border);
 }
-.target-row:last-child, .window-row:last-child { border-bottom: none; }
-.target-row .t-name { flex: 1 1 140px; min-width: 100px; }
-.target-row .t-teesheet, .target-row .t-class { flex: 1 1 140px; }
-.target-row .t-teesheet-custom, .target-row .t-class-custom { flex: 0 0 100px; }
-.target-row .t-del, .window-row .w-del { background: transparent; border-color: transparent; color: var(--text-dim); padding: 4px 8px; }
-.target-row .t-del:hover, .window-row .w-del:hover { background: var(--danger); color: var(--accent-fg); }
+.window-row:last-child { border-bottom: none; }
+.window-row .w-del { background: transparent; border-color: transparent; color: var(--text-dim); padding: 4px 8px; }
+.window-row .w-del:hover { background: var(--danger); color: var(--accent-fg); }
+
+#courses-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+#courses-grid .course-option {
+  display: flex; flex-direction: row; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+  margin: 0;
+  font-size: 14px;
+  background: var(--panel-2);
+}
+#courses-grid .course-option:hover { border-color: var(--text-dim); }
+#courses-grid .course-option:has(input:checked) {
+  background: rgba(95, 184, 120, 0.12);
+  border-color: var(--accent);
+}
+#courses-grid .course-option input { margin: 0; }
+
+.booking-class-row { align-items: center; }
+.booking-class-row #booking-class { min-width: 320px; }
+
+.custom-targets { margin-top: 8px; }
+.custom-targets summary { color: var(--text-dim); font-size: 13px; cursor: pointer; padding: 4px 0; }
+.custom-target-row {
+  display: flex; gap: 8px; align-items: center; padding: 6px 0;
+}
+.custom-target-row .ct-name { flex: 1 1 160px; min-width: 100px; }
+.custom-target-row .ct-id { flex: 0 0 120px; }
+.custom-target-row .ct-del { background: transparent; border-color: transparent; color: var(--text-dim); padding: 4px 8px; }
+.custom-target-row .ct-del:hover { background: var(--danger); color: var(--accent-fg); }
+
+.date-input-row {
+  display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap;
+}
+.date-input-row .date-label {
+  flex: 0 0 48px; color: var(--text-dim); font-size: 13px;
+}
+.date-input-row .date-mode { flex: 0 0 140px; }
+.date-input-row .date-relative, .date-input-row .date-specific {
+  flex: 1 1 200px; max-width: 260px;
+}
 
 .window-row .weekdays { display: flex; gap: 4px; flex-wrap: wrap; }
 .window-row .weekdays label {
@@ -135,5 +181,9 @@ form .hint { color: var(--text-dim); font-size: 12px; margin: 6px 0 0 0; }
 
 @media (max-width: 600px) {
   main { padding: 16px; }
-  .target-row, .window-row { flex-direction: column; align-items: stretch; }
+  .window-row, .custom-target-row { flex-direction: column; align-items: stretch; }
+  .date-input-row { flex-direction: column; align-items: stretch; }
+  .date-input-row .date-label { flex: none; }
+  .date-input-row .date-mode { flex: none; }
+  .booking-class-row #booking-class { min-width: 0; width: 100%; }
 }
