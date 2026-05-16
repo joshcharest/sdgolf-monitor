@@ -86,7 +86,7 @@
       <form id="edit-form">
         <label>
           Name <small>(used as the filename)</small>
-          <input type="text" name="name" pattern="[a-z0-9][a-z0-9-]*" required />
+          <input type="text" name="name" pattern="[^/\\:*?&quot;&lt;&gt;|]+" required />
         </label>
         <label class="inline">
           <input type="checkbox" name="enabled" checked />
