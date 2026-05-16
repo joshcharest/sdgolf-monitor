@@ -3,16 +3,32 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>sdgolf-monitor</title>
+  <title>sdgolf · tee time monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,400..700,0..100;1,9..144,400..700,0..100&family=JetBrains+Mono:wght@400;500&family=Sora:wght@300;400;500;600&display=swap"
+    rel="stylesheet"
+  />
   <link rel="stylesheet" href="./style.css" />
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 </head>
 <body>
   <header>
-    <h1>sdgolf-monitor</h1>
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 32" width="22" height="30" aria-hidden="true">
+        <path d="M6 30 V3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none" />
+        <path d="M6 3.5 L21 7.5 L6 12 Z" fill="currentColor" />
+        <ellipse cx="6" cy="30" rx="3.5" ry="1" fill="currentColor" opacity="0.6" />
+      </svg>
+      <div class="brand-text">
+        <h1>sdgolf <em>·</em> tee time monitor</h1>
+        <p class="brand-sub">San Diego city courses · live availability</p>
+      </div>
+    </div>
     <nav>
-      <button id="new-btn" type="button" hidden>＋ New check set</button>
-      <a id="repo-link" href="https://github.com/joshcharest/sdgolf-monitor" target="_blank" rel="noopener">repo ↗</a>
+      <button id="new-btn" type="button" hidden>New check set</button>
+      <a id="repo-link" href="https://github.com/joshcharest/sdgolf-monitor" target="_blank" rel="noopener">repo</a>
       <button id="signout-btn" type="button" hidden>Sign out</button>
     </nav>
   </header>
