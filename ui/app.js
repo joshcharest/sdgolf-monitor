@@ -192,15 +192,14 @@ function renderCard({ name, cfg, error }) {
     }
   });
 
-  article.querySelector(".card-desc").textContent = cfg.description || "";
-
   const targets = (cfg.targets || []).map(t => t.name).join(", ");
   article.querySelector(".card-targets").textContent = `Targets: ${targets || "(none)"}`;
   const d = cfg.dates || {};
   article.querySelector(".card-dates").textContent = `Dates: ${d.start || "?"} → ${d.end || "?"}`;
   const f = cfg.filter || {};
   const windowsSummary = (f.windows || []).map(w => `${w.start}-${w.end}`).join(", ") || "(any time)";
-  article.querySelector(".card-filter").textContent = `${f.holes || 18}h • ≥${f.min_players || 1}p • ${windowsSummary}`;
+  const holesSummary = Array.isArray(f.holes) ? f.holes.join("+") : (f.holes || 18);
+  article.querySelector(".card-filter").textContent = `${holesSummary}h • ≥${f.min_players || 1}p • ${windowsSummary}`;
 
   article.querySelector(".edit-btn").addEventListener("click", () => renderEdit(name));
   return node;
@@ -211,8 +210,7 @@ function renderEdit(existingName) {
   const cached = existingName ? CACHE.get(existingName) : null;
   const cfg = cached?.cfg || {
     enabled: true,
-    description: "",
-    targets: [{ name: "", teesheet_id: 1470, booking_class: 929 }],
+    targets: [],
     dates: { start: "today", end: "today+90" },
     filter: { holes: 18, min_players: 2, max_green_fee: null, windows: [{ start: "07:00", end: "11:00", weekdays: ["sat", "sun"] }] },
   };
@@ -228,18 +226,13 @@ function renderEdit(existingName) {
   form.elements["name"].value = existingName || "";
   if (existingName) form.elements["name"].disabled = true;
   form.elements["enabled"].checked = cfg.enabled !== false;
-  form.elements["description"].value = cfg.description || "";
-  form.elements["date-start"].value = cfg.dates?.start || "today";
-  form.elements["date-end"].value = cfg.dates?.end || "today+90";
-  form.elements["holes"].value = String(cfg.filter?.holes ?? 18);
+  form.elements["holes"].value = holesToSelectValue(cfg.filter?.holes);
   form.elements["min-players"].value = cfg.filter?.min_players ?? 2;
   form.elements["max-fee"].value = cfg.filter?.max_green_fee ?? "";
 
-  const targetsList = document.getElementById("targets-list");
-  for (const t of cfg.targets || []) targetsList.appendChild(buildTargetRow(t));
-  document.getElementById("add-target").addEventListener("click", () => {
-    targetsList.appendChild(buildTargetRow({ name: "", teesheet_id: 1470, booking_class: 929 }));
-  });
+  setupTargets(cfg.targets || []);
+  setupDateInput(form, "start", cfg.dates?.start || "today");
+  setupDateInput(form, "end", cfg.dates?.end || "today+90");
 
   const windowsList = document.getElementById("windows-list");
   for (const w of cfg.filter?.windows || []) windowsList.appendChild(buildWindowRow(w));
@@ -289,46 +282,88 @@ function renderEdit(existingName) {
   });
 }
 
-function buildTargetRow(t) {
-  const node = document.getElementById("target-row").content.cloneNode(true);
-  const sheetSel = node.querySelector(".t-teesheet");
-  const sheetCustom = node.querySelector(".t-teesheet-custom");
-  for (const ts of TEESHEETS) {
-    const opt = document.createElement("option");
-    opt.value = ts.id; opt.textContent = ts.label;
-    sheetSel.appendChild(opt);
-  }
-  const customSheet = document.createElement("option");
-  customSheet.value = "custom"; customSheet.textContent = "Custom…";
-  sheetSel.appendChild(customSheet);
+function setupTargets(targets) {
+  const knownIds = new Set(TEESHEETS.map(ts => ts.id));
+  const selectedIds = new Set(targets.map(t => t.teesheet_id).filter(id => knownIds.has(id)));
+  const customTargets = targets.filter(t => !knownIds.has(t.teesheet_id));
 
-  const classSel = node.querySelector(".t-class");
-  const classCustom = node.querySelector(".t-class-custom");
+  // Course checkboxes
+  const grid = document.getElementById("courses-grid");
+  for (const ts of TEESHEETS) {
+    const node = document.getElementById("course-option").content.cloneNode(true);
+    const cb = node.querySelector("input");
+    cb.value = ts.id;
+    cb.checked = selectedIds.has(ts.id);
+    node.querySelector(".course-label").textContent = ts.label;
+    grid.appendChild(node);
+  }
+
+  // Booking class: shared across all targets in this set. Pick from the
+  // first target if any; otherwise default to 929 (the common case).
+  const bcCounts = new Map();
+  for (const t of targets) bcCounts.set(t.booking_class, (bcCounts.get(t.booking_class) || 0) + 1);
+  const dominantBc = [...bcCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 929;
+  if (bcCounts.size > 1) {
+    toast("Note: this set had mixed booking classes; the most common one is selected for all courses", "info");
+  }
+
+  const bcSel = document.getElementById("booking-class");
   for (const bc of BOOKING_CLASSES) {
     const opt = document.createElement("option");
     opt.value = bc.id; opt.textContent = bc.label;
-    classSel.appendChild(opt);
+    bcSel.appendChild(opt);
   }
-  const customClass = document.createElement("option");
-  customClass.value = "custom"; customClass.textContent = "Custom…";
-  classSel.appendChild(customClass);
+  bcSel.appendChild(Object.assign(document.createElement("option"), { value: "custom", textContent: "Custom…" }));
+  const bcCustom = document.getElementById("booking-class-custom");
+  if (BOOKING_CLASSES.some(bc => bc.id === dominantBc)) {
+    bcSel.value = String(dominantBc);
+  } else {
+    bcSel.value = "custom"; bcCustom.value = dominantBc; bcCustom.hidden = false;
+  }
+  bcSel.addEventListener("change", () => { bcCustom.hidden = bcSel.value !== "custom"; });
 
-  node.querySelector(".t-name").value = t.name || "";
-  if (TEESHEETS.some(ts => ts.id === t.teesheet_id)) {
-    sheetSel.value = String(t.teesheet_id);
-  } else if (t.teesheet_id != null) {
-    sheetSel.value = "custom"; sheetCustom.value = t.teesheet_id; sheetCustom.hidden = false;
-  }
-  if (BOOKING_CLASSES.some(bc => bc.id === t.booking_class)) {
-    classSel.value = String(t.booking_class);
-  } else if (t.booking_class != null) {
-    classSel.value = "custom"; classCustom.value = t.booking_class; classCustom.hidden = false;
-  }
-  sheetSel.addEventListener("change", () => { sheetCustom.hidden = sheetSel.value !== "custom"; });
-  classSel.addEventListener("change", () => { classCustom.hidden = classSel.value !== "custom"; });
+  // Custom targets (rare — teesheet ids not in TEESHEETS)
+  const customList = document.getElementById("custom-targets-list");
+  const customDetails = customList.closest("details");
+  for (const t of customTargets) customList.appendChild(buildCustomTargetRow(t));
+  if (customTargets.length > 0) customDetails.open = true;
+  document.getElementById("add-custom-target").addEventListener("click", () => {
+    customList.appendChild(buildCustomTargetRow({ name: "", teesheet_id: "" }));
+  });
+}
 
-  node.querySelector(".t-del").addEventListener("click", (e) => e.target.closest(".target-row").remove());
+function buildCustomTargetRow(t) {
+  const node = document.getElementById("custom-target-row").content.cloneNode(true);
+  node.querySelector(".ct-name").value = t.name || "";
+  node.querySelector(".ct-id").value = t.teesheet_id ?? "";
+  node.querySelector(".ct-del").addEventListener("click", (e) => e.target.closest(".custom-target-row").remove());
   return node;
+}
+
+// Date spec: either "today", "today±N", or an ISO YYYY-MM-DD string.
+// Renders a mode select + two inputs (text for relative, date for specific)
+// and toggles visibility.
+function setupDateInput(form, which, spec) {
+  const modeSel = form.elements[`date-${which}-mode`];
+  const relativeInput = form.elements[`date-${which}-relative`];
+  const specificInput = form.elements[`date-${which}-specific`];
+
+  const isIso = /^\d{4}-\d{2}-\d{2}$/.test(spec);
+  if (isIso) {
+    modeSel.value = "specific";
+    specificInput.value = spec;
+  } else {
+    modeSel.value = "relative";
+    relativeInput.value = spec || (which === "start" ? "today" : "today+90");
+  }
+  applyDateMode(modeSel, relativeInput, specificInput);
+  modeSel.addEventListener("change", () => applyDateMode(modeSel, relativeInput, specificInput));
+}
+
+function applyDateMode(modeSel, relativeInput, specificInput) {
+  const isSpecific = modeSel.value === "specific";
+  relativeInput.hidden = isSpecific;
+  specificInput.hidden = !isSpecific;
 }
 
 function buildWindowRow(w) {
@@ -344,55 +379,94 @@ function buildWindowRow(w) {
 }
 
 function readForm(form) {
+  // Booking class — shared across all targets in this set.
+  const bcSel = form.querySelector("#booking-class");
+  const booking_class = bcSel.value === "custom"
+    ? parseInt(form.querySelector("#booking-class-custom").value, 10)
+    : parseInt(bcSel.value, 10);
+  if (!Number.isFinite(booking_class)) throw new Error("Booking class is required");
+
   const targets = [];
-  for (const row of document.querySelectorAll("#targets-list .target-row")) {
-    const name = row.querySelector(".t-name").value.trim();
-    if (!name) continue;
-    const sheetSel = row.querySelector(".t-teesheet");
-    const teesheet_id = sheetSel.value === "custom"
-      ? parseInt(row.querySelector(".t-teesheet-custom").value, 10)
-      : parseInt(sheetSel.value, 10);
-    const classSel = row.querySelector(".t-class");
-    const booking_class = classSel.value === "custom"
-      ? parseInt(row.querySelector(".t-class-custom").value, 10)
-      : parseInt(classSel.value, 10);
-    if (!Number.isFinite(teesheet_id) || !Number.isFinite(booking_class)) {
-      throw new Error(`Target "${name}" has an invalid teesheet or booking class`);
+  for (const cb of form.querySelectorAll('input[name="course"]:checked')) {
+    const id = parseInt(cb.value, 10);
+    const meta = TEESHEETS.find(ts => ts.id === id);
+    targets.push({ name: meta.label, teesheet_id: id, booking_class });
+  }
+  for (const row of form.querySelectorAll("#custom-targets-list .custom-target-row")) {
+    const name = row.querySelector(".ct-name").value.trim();
+    const idRaw = row.querySelector(".ct-id").value.trim();
+    if (!name && !idRaw) continue;
+    const teesheet_id = parseInt(idRaw, 10);
+    if (!name || !Number.isFinite(teesheet_id)) {
+      throw new Error("Each custom course needs a name and a numeric teesheet id");
     }
     targets.push({ name, teesheet_id, booking_class });
   }
-  if (targets.length === 0) throw new Error("at least one target is required");
+  if (targets.length === 0) throw new Error("Select at least one course (or add a custom course)");
 
   const windows = [];
-  for (const row of document.querySelectorAll("#windows-list .window-row")) {
+  for (const row of form.querySelectorAll("#windows-list .window-row")) {
     const start = row.querySelector(".w-start").value;
     const end = row.querySelector(".w-end").value;
     if (!start || !end) continue;
+    if (start >= end) throw new Error(`Window ${start}–${end}: end must be after start (use 24h time, e.g. 16:00 for 4 PM)`);
     const weekdays = [...row.querySelectorAll(".weekdays input:checked")].map(cb => cb.value);
     const w = { start, end };
     if (weekdays.length > 0) w.weekdays = weekdays;
     windows.push(w);
   }
-  if (windows.length === 0) throw new Error("at least one time window is required");
+  if (windows.length === 0) throw new Error("At least one time window is required");
+
+  const dateStart = readDateSpec(form, "start");
+  const dateEnd = readDateSpec(form, "end");
 
   const maxFeeRaw = form.elements["max-fee"].value.trim();
   const cfg = {
     enabled: form.elements["enabled"].checked,
-    description: form.elements["description"].value.trim() || undefined,
     targets,
-    dates: {
-      start: form.elements["date-start"].value.trim(),
-      end: form.elements["date-end"].value.trim(),
-    },
+    dates: { start: dateStart, end: dateEnd },
     filter: {
-      holes: parseInt(form.elements["holes"].value, 10),
+      holes: readHoles(form),
       min_players: parseInt(form.elements["min-players"].value, 10),
       max_green_fee: maxFeeRaw === "" ? null : Number(maxFeeRaw),
       windows,
     },
   };
-  if (!cfg.description) delete cfg.description;
   return cfg;
+}
+
+// "18" / "9" / "both" → 18 / 9 / [9, 18]. The select stores the raw value.
+function readHoles(form) {
+  const v = form.elements["holes"].value;
+  if (v === "both") return [9, 18];
+  return parseInt(v, 10);
+}
+
+// YAML holes value → matching <select> option. Accepts int (18/9), list
+// (treated as Both if it contains both 9 and 18), or missing.
+function holesToSelectValue(holes) {
+  if (Array.isArray(holes)) {
+    const set = new Set(holes.map(h => parseInt(h, 10)));
+    if (set.has(9) && set.has(18)) return "both";
+    if (set.has(9)) return "9";
+    return "18";
+  }
+  return String(holes ?? 18);
+}
+
+function readDateSpec(form, which) {
+  const mode = form.elements[`date-${which}-mode`].value;
+  if (mode === "specific") {
+    const v = form.elements[`date-${which}-specific`].value;
+    if (!v) throw new Error(`${which === "start" ? "Start" : "End"} date is required`);
+    return v;
+  }
+  const v = form.elements[`date-${which}-relative`].value.trim();
+  if (!v) throw new Error(`${which === "start" ? "Start" : "End"} date is required`);
+  if (!/^today(\s*[+-]\s*\d+)?$/i.test(v)) {
+    throw new Error(`${which === "start" ? "Start" : "End"} date '${v}' must be "today", "today+N", or "today-N"`);
+  }
+  return v;
 }
 
 // ----- Boot --------------------------------------------------------------

@@ -29,16 +29,29 @@ class Filter:
     min_players: int                 # require at least this many open spots
     windows: tuple[Window, ...]      # OR'd: any window may match
     max_green_fee: float | None      # skip if green_fee strictly above this
-    holes: int                       # 9 or 18
+    holes: tuple[int, ...]           # subset of {9, 18}; len 1 = one count, len 2 = both
 
     def matches(self, tt: TeeTime) -> bool:
-        if tt.holes != self.holes:
+        if tt.holes not in self.holes:
             return False
         if tt.available_spots < self.min_players:
             return False
         if self.max_green_fee is not None and tt.green_fee is not None and tt.green_fee > self.max_green_fee:
             return False
         return any(w.matches(tt.date, tt.time) for w in self.windows)
+
+
+def parse_holes(value: object) -> tuple[int, ...]:
+    """Accept ``18``, ``9``, or ``[9, 18]``. Returns a sorted, deduped tuple."""
+    if isinstance(value, (list, tuple)):
+        out = tuple(sorted({int(v) for v in value}))
+    elif value is None:
+        out = (18,)
+    else:
+        out = (int(value),)
+    if not out or any(h not in (9, 18) for h in out):
+        raise ValueError(f"holes must be 9, 18, or [9, 18]; got {value!r}")
+    return out
 
 
 _RELATIVE_RE = re.compile(r"^today\s*([+-]\s*\d+)?$")

@@ -92,22 +92,45 @@
           <input type="checkbox" name="enabled" checked />
           Enabled
         </label>
-        <label>
-          Description <small>(optional)</small>
-          <textarea name="description" rows="2"></textarea>
-        </label>
 
         <fieldset>
-          <legend>Targets</legend>
-          <div id="targets-list"></div>
-          <button type="button" id="add-target">＋ Add target</button>
+          <legend>Courses</legend>
+          <div id="courses-grid"></div>
+          <div class="row booking-class-row">
+            <label class="inline">
+              Booking class
+              <select id="booking-class" name="booking-class"></select>
+            </label>
+            <input type="number" id="booking-class-custom" placeholder="custom id" hidden />
+          </div>
+          <details class="custom-targets">
+            <summary>Add custom course (rare — for teesheet ids not in the list)</summary>
+            <div id="custom-targets-list"></div>
+            <button type="button" id="add-custom-target">＋ Add custom course</button>
+          </details>
         </fieldset>
 
         <fieldset>
           <legend>Date range</legend>
-          <label class="inline">Start <input type="text" name="date-start" placeholder="today or 2026-06-01" required /></label>
-          <label class="inline">End   <input type="text" name="date-end" placeholder="today+90 or 2026-09-01" required /></label>
-          <p class="hint">Accepts ISO dates or <code>today</code> / <code>today+N</code> / <code>today-N</code>.</p>
+          <div class="date-input-row">
+            <span class="date-label">Start</span>
+            <select name="date-start-mode" class="date-mode">
+              <option value="relative">Relative</option>
+              <option value="specific">Specific date</option>
+            </select>
+            <input type="text" name="date-start-relative" class="date-relative" placeholder="today or today+30" />
+            <input type="date" name="date-start-specific" class="date-specific" hidden />
+          </div>
+          <div class="date-input-row">
+            <span class="date-label">End</span>
+            <select name="date-end-mode" class="date-mode">
+              <option value="relative">Relative</option>
+              <option value="specific">Specific date</option>
+            </select>
+            <input type="text" name="date-end-relative" class="date-relative" placeholder="today+90" />
+            <input type="date" name="date-end-specific" class="date-specific" hidden />
+          </div>
+          <p class="hint">Relative accepts <code>today</code>, <code>today+N</code>, <code>today-N</code>. Specific date uses your browser's calendar picker.</p>
         </fieldset>
 
         <fieldset>
@@ -118,6 +141,7 @@
               <select name="holes">
                 <option value="18" selected>18</option>
                 <option value="9">9</option>
+                <option value="both">Both</option>
               </select>
             </label>
             <label class="inline">
@@ -135,6 +159,7 @@
           <legend>Time windows <small>(any window may match)</small></legend>
           <div id="windows-list"></div>
           <button type="button" id="add-window">＋ Add window</button>
+          <p class="hint">Weekdays AND with the date range. If start &amp; end are the same specific date, leave weekdays empty unless you want a second guard.</p>
         </fieldset>
 
         <footer class="edit-footer">
@@ -147,15 +172,19 @@
     </section>
   </template>
 
-  <template id="target-row">
-    <div class="target-row">
-      <input type="text" class="t-name" placeholder="Display name" required />
-      <select class="t-teesheet"></select>
-      <input type="number" class="t-teesheet-custom" placeholder="custom id" hidden />
-      <select class="t-class"></select>
-      <input type="number" class="t-class-custom" placeholder="custom id" hidden />
-      <button type="button" class="t-del" title="Remove target">✕</button>
+  <template id="custom-target-row">
+    <div class="custom-target-row">
+      <input type="text" class="ct-name" placeholder="Display name" />
+      <input type="number" class="ct-id" placeholder="Teesheet id" />
+      <button type="button" class="ct-del" title="Remove">✕</button>
     </div>
+  </template>
+
+  <template id="course-option">
+    <label class="course-option">
+      <input type="checkbox" name="course" />
+      <span class="course-label"></span>
+    </label>
   </template>
 
   <template id="window-row">

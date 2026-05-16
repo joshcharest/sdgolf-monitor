@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from sdgolf_monitor.client import TeeTime
-from sdgolf_monitor.filter import Filter, Window, date_range, parse_weekdays, resolve_date
+from sdgolf_monitor.filter import Filter, Window, date_range, parse_holes, parse_weekdays, resolve_date
 
 
 def tt(date="2026-06-06", time="08:00", spots=4, holes=18, fee=50.0):
@@ -30,7 +30,7 @@ def test_window_weekday_filter():
 
 
 def test_filter_min_players():
-    f = Filter(min_players=3, max_green_fee=None, holes=18,
+    f = Filter(min_players=3, max_green_fee=None, holes=(18,),
                windows=(Window("06:00", "20:00"),))
     assert f.matches(tt(spots=3))
     assert f.matches(tt(spots=4))
@@ -38,7 +38,7 @@ def test_filter_min_players():
 
 
 def test_filter_max_green_fee():
-    f = Filter(min_players=1, max_green_fee=100, holes=18,
+    f = Filter(min_players=1, max_green_fee=100, holes=(18,),
                windows=(Window("06:00", "20:00"),))
     assert f.matches(tt(fee=99))
     assert f.matches(tt(fee=100))
@@ -46,14 +46,34 @@ def test_filter_max_green_fee():
 
 
 def test_filter_holes_must_match():
-    f = Filter(min_players=1, max_green_fee=None, holes=18,
+    f = Filter(min_players=1, max_green_fee=None, holes=(18,),
                windows=(Window("06:00", "20:00"),))
     assert f.matches(tt(holes=18))
     assert not f.matches(tt(holes=9))
 
 
+def test_filter_holes_both():
+    f = Filter(min_players=1, max_green_fee=None, holes=(9, 18),
+               windows=(Window("06:00", "20:00"),))
+    assert f.matches(tt(holes=18))
+    assert f.matches(tt(holes=9))
+
+
+def test_parse_holes():
+    assert parse_holes(18) == (18,)
+    assert parse_holes("18") == (18,)
+    assert parse_holes(None) == (18,)
+    assert parse_holes([9, 18]) == (9, 18)
+    assert parse_holes([18, 9]) == (9, 18)
+    assert parse_holes([9, 9, 18]) == (9, 18)
+    with pytest.raises(ValueError):
+        parse_holes(7)
+    with pytest.raises(ValueError):
+        parse_holes([])
+
+
 def test_filter_multiple_windows_or():
-    f = Filter(min_players=1, max_green_fee=None, holes=18,
+    f = Filter(min_players=1, max_green_fee=None, holes=(18,),
                windows=(Window("07:00", "09:00"), Window("17:00", "19:00")))
     assert f.matches(tt(time="08:00"))
     assert f.matches(tt(time="18:00"))
