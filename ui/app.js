@@ -148,24 +148,61 @@ async function renderList() {
     return;
   }
 
-  // Load all configs in parallel
-  const loaded = await Promise.all(items.map(async (it) => {
-    const name = it.name.replace(/\.yaml$/, "");
-    try {
-      const data = await loadConfig(name);
-      CACHE.set(name, data);
-      return { name, ...data };
-    } catch (e) {
-      return { name, error: e.message };
-    }
-  }));
+  // Load configs and the snapshot in parallel — the snapshot is "nice to
+  // have" and shouldn't block the card list if KV isn't wired up yet.
+  const [loaded, snapshot] = await Promise.all([
+    Promise.all(items.map(async (it) => {
+      const name = it.name.replace(/\.yaml$/, "");
+      try {
+        const data = await loadConfig(name);
+        CACHE.set(name, data);
+        return { name, ...data };
+      } catch (e) {
+        return { name, error: e.message };
+      }
+    })),
+    loadSnapshot(),
+  ]);
 
+  renderSnapshotMeta(snapshot);
+  const setsBySet = snapshot?.sets || {};
   for (const item of loaded.sort((a, b) => a.name.localeCompare(b.name))) {
-    cardsEl.appendChild(renderCard(item));
+    cardsEl.appendChild(renderCard(item, setsBySet[item.name]));
   }
 }
 
-function renderCard({ name, cfg, error }) {
+async function loadSnapshot() {
+  try {
+    const resp = await fetch("/api/snapshot", { cache: "no-store" });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+function renderSnapshotMeta(snapshot) {
+  const meta = document.getElementById("snapshot-meta");
+  if (!meta) return;
+  if (!snapshot?.generated_at) {
+    meta.textContent = "No snapshot yet — waiting for first cron run";
+    return;
+  }
+  meta.textContent = `Tee times updated ${relativeTime(snapshot.generated_at)} (${snapshot.generated_at})`;
+}
+
+function relativeTime(iso) {
+  const then = new Date(iso).getTime();
+  const sec = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} hr ago`;
+  return `${Math.round(hr / 24)} d ago`;
+}
+
+function renderCard({ name, cfg, error }, snapshotEntry) {
   const node = document.getElementById("card").content.cloneNode(true);
   const article = node.querySelector("article");
   article.querySelector(".card-name").textContent = name;
@@ -201,8 +238,58 @@ function renderCard({ name, cfg, error }) {
   const holesSummary = Array.isArray(f.holes) ? f.holes.join("+") : (f.holes || 18);
   article.querySelector(".card-filter").textContent = `${holesSummary}h • ≥${f.min_players || 1}p • ${windowsSummary}`;
 
+  renderCardMatches(article, snapshotEntry);
+
   article.querySelector(".edit-btn").addEventListener("click", () => renderEdit(name));
   return node;
+}
+
+function renderCardMatches(article, entry) {
+  const wrapper = article.querySelector(".card-matches");
+  const summary = article.querySelector(".card-matches-summary");
+  const list = article.querySelector(".card-matches-list");
+
+  if (!entry) {
+    summary.textContent = "no data yet";
+    summary.classList.add("dim");
+    return;
+  }
+  if (entry.error) {
+    summary.textContent = `error: ${entry.error}`;
+    summary.classList.add("err");
+    return;
+  }
+  if (entry.enabled === false) {
+    summary.textContent = "disabled";
+    summary.classList.add("dim");
+    return;
+  }
+  const matches = entry.matches || [];
+  if (matches.length === 0) {
+    summary.textContent = "0 matches";
+    summary.classList.add("dim");
+    return;
+  }
+  summary.textContent = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
+  summary.classList.add("hit");
+
+  // Sort by date then time and cap the list so the card stays compact.
+  const sorted = matches.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const MAX = 8;
+  for (const m of sorted.slice(0, MAX)) {
+    const li = document.createElement("li");
+    const fee = m.green_fee == null ? "" : ` $${Math.round(m.green_fee)}`;
+    const bf = m.booking_fee ? "•BF" : "";
+    li.textContent = `${m.date} ${m.time} — ${m.target} (${m.available_spots}p ${m.holes}h${fee}${bf})`;
+    list.appendChild(li);
+  }
+  if (sorted.length > MAX) {
+    const li = document.createElement("li");
+    li.className = "more";
+    li.textContent = `…${sorted.length - MAX} more`;
+    list.appendChild(li);
+  }
+  wrapper.hidden = false;
 }
 
 function renderEdit(existingName) {

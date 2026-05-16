@@ -158,3 +158,30 @@ def test_no_configs_returns_zero(tmp_path, monkeypatch, caplog):
     rc = main_mod.main(cfg_dir, tmp_path / "state", dry_run=True)
     assert rc == 0
     assert "no check sets found" in caplog.text
+
+
+def test_snapshot_records_matches_disabled_and_errors(tmp_path, monkeypatch):
+    cfg_dir = tmp_path / "configs"
+    cfg_dir.mkdir()
+    _write_config(cfg_dir, "ok-set", _config(["A"]))
+    _write_config(cfg_dir, "disabled-set", _config(["B"], enabled=False))
+    (cfg_dir / "broken-set.yaml").write_text("enabled: true\ntargets: []\n")
+
+    rows = [{"date": "2026-06-01", "time": "08:00"}]
+    stub = StubClient(by_target={"A": rows})
+    monkeypatch.setenv("SDGOLF_USERNAME", "x")
+    monkeypatch.setenv("SDGOLF_PASSWORD", "x")
+    monkeypatch.setattr(main_mod, "ForeUpClient", lambda: stub)
+
+    snap_path = tmp_path / "snapshot.json"
+    main_mod.main(cfg_dir, tmp_path / "state", dry_run=True, snapshot_path=snap_path)
+    payload = json.loads(snap_path.read_text())
+
+    assert "generated_at" in payload
+    sets = payload["sets"]
+    assert sets["ok-set"]["enabled"] is True
+    assert len(sets["ok-set"]["matches"]) == 1
+    assert sets["ok-set"]["matches"][0]["target"] == "A"
+    assert sets["disabled-set"]["enabled"] is False
+    assert sets["disabled-set"]["matches"] == []
+    assert "error" in sets["broken-set"]
