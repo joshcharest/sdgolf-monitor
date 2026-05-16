@@ -33,8 +33,11 @@ def run_check_set(
     set_name: str,
     dry_run: bool,
     smtp: SmtpCreds | None,
-) -> None:
+) -> list[TeeTime]:
     """Run one config to completion. Caller handles exception isolation.
+
+    Returns the full list of current matches for this set (independent of
+    dedup state) so the orchestrator can build a snapshot for the UI.
 
     Args:
         client: Already-logged-in ForeUp client; reused across check sets.
@@ -96,18 +99,18 @@ def run_check_set(
         )
         if not dry_run:
             state.save(state_path, seen)
-        return
+        return matches
 
     if not new:
         log.info("[%s] no new matches (%d already known)", set_name, len(matches))
         if not dry_run:
             state.save(state_path, seen)
-        return
+        return matches
 
     log.info("[%s] found %d new tee time(s)", set_name, len(new))
     if dry_run:
         log.info("[%s] DRY RUN — would email subject %r", set_name, notify._subject(set_name, new))
-        return
+        return matches
 
     if smtp is None:
         raise RuntimeError("smtp creds required for non-dry-run with new matches")
@@ -119,3 +122,4 @@ def run_check_set(
         new_times=new,
     )
     state.save(state_path, seen)
+    return matches

@@ -41,7 +41,7 @@ jobs:
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
-        run: python -m sdgolf_monitor.main
+        run: python -m sdgolf_monitor.main --snapshot-path snapshot.json
 
       - name: Save state cache
         if: always() && hashFiles('state/**') != ''
@@ -49,3 +49,21 @@ jobs:
         with:
           path: state
           key: state-${{ github.run_id }}
+
+      # Publish a snapshot of current matches to Cloudflare KV so the UI
+      # can show live tee times without ever calling ForeUp from the
+      # browser. Skipped silently if CF secrets aren't configured yet.
+      - name: Publish snapshot to Cloudflare KV
+        if: always() && hashFiles('snapshot.json') != '' && env.CF_API_TOKEN != ''
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE_ID}/values/snapshot" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data-binary @snapshot.json > /dev/null
+          echo "snapshot uploaded ($(wc -c < snapshot.json) bytes)"
