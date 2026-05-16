@@ -14,11 +14,11 @@ dates:
   end: today+8
 filter:
   holes: 18
-  min_players: 2
+  min_players: 4
   max_green_fee: null
   windows:
-    - start: 07:00
-      end: 11:00
+    - start: 08:00
+      end: 16:00
       weekdays:
         - sat
         - sun
