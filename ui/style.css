@@ -50,9 +50,10 @@ main {
 
 .snapshot-meta {
   color: var(--text-dim); font-size: 13px;
-  margin: 0 0 16px 0; padding: 8px 12px;
+  margin: 16px 0 0 0; padding: 8px 12px;
   background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius);
+  text-align: center;
 }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
