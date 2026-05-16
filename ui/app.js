@@ -224,7 +224,6 @@ function renderEdit(existingName) {
 
   const form = document.getElementById("edit-form");
   form.elements["name"].value = existingName || "";
-  if (existingName) form.elements["name"].disabled = true;
   form.elements["enabled"].checked = cfg.enabled !== false;
   form.elements["holes"].value = holesToSelectValue(cfg.filter?.holes);
   form.elements["min-players"].value = cfg.filter?.min_players ?? 2;
@@ -262,20 +261,46 @@ function renderEdit(existingName) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     errEl.hidden = true;
+    const submitBtn = form.querySelector("button[type=submit]");
     try {
       const newCfg = readForm(form);
-      const name = isNew ? form.elements["name"].value : existingName;
-      const submitBtn = form.querySelector("button[type=submit]");
+      const newName = form.elements["name"].value.trim();
+      if (!newName) throw new Error("Name is required");
+      const isRename = !isNew && newName !== existingName;
       submitBtn.disabled = true;
       submitBtn.textContent = "Saving…";
-      const { sha, yaml } = await saveConfig(name, newCfg, cached?.sha);
-      CACHE.set(name, { sha, cfg: newCfg, yaml });
-      toast(`Saved ${name}`);
+
+      if (isRename) {
+        if (!confirm(
+          `Rename "${existingName}" → "${newName}"?\n\n` +
+          `This commits a new file and deletes the old one. ` +
+          `Dedup state will reset, so the next run treats this as a first run and won't email.`
+        )) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Save";
+          return;
+        }
+        // Create-not-clobber: PUT without sha fails (422) if the target exists.
+        const created = await saveConfig(newName, newCfg, null);
+        try {
+          await deleteConfig(existingName, cached.sha);
+        } catch (e) {
+          // New file is up but old file is still there. Don't silently lose this.
+          throw new Error(`Renamed to ${newName} but failed to delete ${existingName}: ${e.message}. Delete it manually.`);
+        }
+        CACHE.delete(existingName);
+        CACHE.set(newName, { sha: created.sha, cfg: newCfg, yaml: created.yaml });
+        toast(`Renamed ${existingName} → ${newName}`);
+      } else {
+        const name = isNew ? newName : existingName;
+        const { sha, yaml } = await saveConfig(name, newCfg, cached?.sha);
+        CACHE.set(name, { sha, cfg: newCfg, yaml });
+        toast(`Saved ${name}`);
+      }
       renderList();
     } catch (e) {
       errEl.textContent = `Save failed: ${e.message}`;
       errEl.hidden = false;
-      const submitBtn = form.querySelector("button[type=submit]");
       submitBtn.disabled = false;
       submitBtn.textContent = "Save";
     }
