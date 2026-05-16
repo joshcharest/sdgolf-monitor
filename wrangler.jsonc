@@ -1,14 +1,19 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sdgolf-monitor",
+  "main": "worker.js",
   "compatibility_date": "2026-05-13",
   "observability": {
     "enabled": true
   },
   "assets": {
-    "directory": "ui"
+    "directory": "ui",
+    "binding": "ASSETS"
   },
   "compatibility_flags": [
     "nodejs_compat"
+  ],
+  "kv_namespaces": [
+    { "binding": "SNAPSHOT_KV", "id": "2ec6225e728d4004bb495a67ae87ad65" }
   ]
 }
