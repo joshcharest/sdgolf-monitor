@@ -1,0 +1,26 @@
+enabled: true
+targets:
+  - name: Balboa Park 18
+    teesheet_id: 1470
+    booking_class: 929
+  - name: Torrey Pines North
+    teesheet_id: 1468
+    booking_class: 929
+  - name: Torrey Pines South
+    teesheet_id: 1487
+    booking_class: 929
+dates:
+  start: today
+  end: today+8
+filter:
+  holes:
+    - 9
+    - 18
+  min_players: 4
+  max_green_fee: null
+  windows:
+    - start: 08:00
+      end: 16:00
+      weekdays:
+        - sat
+        - sun
