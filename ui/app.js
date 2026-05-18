@@ -329,7 +329,7 @@ function buildMatchLi(m) {
     mkSpan("match-where", m.target),
   );
 
-  const rate = residentRate(m.target, m.date, m.holes);
+  const rate = residentRate(m.target, m.green_fee);
   const fee = rate == null ? null : `$${rate % 1 === 0 ? rate : rate.toFixed(2)}`;
   const bf = m.booking_fee ? "+ Advanced Booking Fee" : null;
   const metaParts = [`${m.available_spots}p`, `${m.holes}`, fee, bf].filter(Boolean);
@@ -372,30 +372,44 @@ function formatDate(spec) {
   return `${dow} ${m}/${d}`;
 }
 
-// SD City Golf resident rates (base 18/9-hole; no senior/junior/twilight).
-// Source: sandiegocitygolf.com rate cards as of 2026. Quirk: Torrey treats
-// Fri as weekend while Balboa treats Fri as weekday. Holidays not modelled —
-// they'll show the weekday rate if they fall on Mon-Thu/Mon-Fri.
-const RATE_CARD = {
-  "Balboa Park 18": { 18: { weekday: 39.50, weekend: 49 }, 9: { weekday: 18, weekend: 24 } },
-  "Balboa Park 9":  { 9: { weekday: 18, weekend: 24 } },
-  "Torrey Pines South": { 18: { weekday: 73, weekend: 90 } },
-  "Torrey Pines North": { 18: { weekday: 51, weekend: 68 } },
+// Map ForeUp's published (non-resident) green-fee to the SD City Resident
+// equivalent, per course. Source: sandiegocitygolf.com rate cards (2026).
+// Inheriting ForeUp's price as the key lets us reuse their weekday/weekend/
+// twilight logic automatically — we just enumerate the prices we observe.
+// Unmapped non-resident prices fall through (no price displayed).
+const RATE_MAP = {
+  "Balboa Park 18": {
+    56.50: 39.50,   // weekday 18
+    71:    49,      // weekend 18
+    34:    25,      // weekday 18 twilight
+    43:    30,      // weekend 18 twilight
+    39:    35,      // weekday 18 junior
+    25.50: 18,      // weekday 9
+    32:    24,      // weekend 9
+    19.50: 17,      // weekday 9 junior
+  },
+  "Balboa Park 9": {
+    25.50: 18, 32: 24, 19.50: 17,
+  },
+  "Torrey Pines South": {
+    258: 73,   // weekday 18
+    180: 73,   // weekday 18 junior (resident same as regular)
+    156: 44,   // weekday 18 twilight
+    322: 90,   // weekend 18 all players
+    194: 54,   // weekend 18 twilight
+  },
+  "Torrey Pines North": {
+    163: 51,   // weekday 18
+    114: 51,   // weekday 18 junior
+    97:  33,   // weekday 18 twilight
+    204: 68,   // weekend 18 all players
+    123: 39,   // weekend twilight OR back-9 6:30am Sat/Sun
+  },
 };
 
-function residentRate(target, dateStr, holes) {
-  const courseRates = RATE_CARD[target];
-  if (!courseRates) return null;
-  const holesRates = courseRates[holes];
-  if (!holesRates) return null;
-  if (typeof dateStr !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
-  const [y, mo, d] = dateStr.split("-").map(Number);
-  const dow = new Date(Date.UTC(y, mo - 1, d)).getUTCDay();  // 0=Sun..6=Sat
-  // Balboa: Sat-Sun = weekend.  Torrey: Fri-Sun = weekend.
-  const isWeekend = target.startsWith("Torrey")
-    ? (dow === 0 || dow === 5 || dow === 6)
-    : (dow === 0 || dow === 6);
-  return holesRates[isWeekend ? "weekend" : "weekday"];
+function residentRate(target, nonResident) {
+  if (typeof nonResident !== "number") return null;
+  return RATE_MAP[target]?.[nonResident] ?? null;
 }
 
 // "08:00" -> "8 AM"; "16:30" -> "4:30 PM"; "12:00" -> "12 PM".
