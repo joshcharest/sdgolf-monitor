@@ -246,7 +246,7 @@ function renderCard({ name, cfg, error }, snapshotEntry) {
   article.querySelector(".card-dates").textContent = start === end ? start : `${start} – ${end}`;
 
   const f = cfg.filter || {};
-  const holesStr = (Array.isArray(f.holes) ? f.holes.join(" + ") : (f.holes ?? 18)) + "h";
+  const holesStr = String(Array.isArray(f.holes) ? f.holes.join(" + ") : (f.holes ?? 18));
   const playersStr = `≥${f.min_players ?? 1}p`;
   const windowsStr = (f.windows || []).map(w => `${fmt12h(w.start)}–${fmt12h(w.end)}`).join(" · ") || "any time";
   article.querySelector(".card-filter").textContent = `${holesStr} · ${playersStr} · ${windowsStr}`;
@@ -329,9 +329,10 @@ function buildMatchLi(m) {
     mkSpan("match-where", m.target),
   );
 
-  const fee = m.green_fee == null ? null : `$${Math.round(m.green_fee)}`;
+  const rate = residentRate(m.target, m.date, m.holes);
+  const fee = rate == null ? null : `$${rate % 1 === 0 ? rate : rate.toFixed(2)}`;
   const bf = m.booking_fee ? "+ Advanced Booking Fee" : null;
-  const metaParts = [`${m.available_spots}p`, `${m.holes}h`, fee, bf].filter(Boolean);
+  const metaParts = [`${m.available_spots}p`, `${m.holes}`, fee, bf].filter(Boolean);
   const meta = document.createElement("div");
   meta.className = "match-meta";
   meta.textContent = metaParts.join(" · ");
@@ -369,6 +370,32 @@ function formatDate(spec) {
   const [y, m, d] = spec.split("-").map(Number);
   const dow = DOW[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
   return `${dow} ${m}/${d}`;
+}
+
+// SD City Golf resident rates (base 18/9-hole; no senior/junior/twilight).
+// Source: sandiegocitygolf.com rate cards as of 2026. Quirk: Torrey treats
+// Fri as weekend while Balboa treats Fri as weekday. Holidays not modelled —
+// they'll show the weekday rate if they fall on Mon-Thu/Mon-Fri.
+const RATE_CARD = {
+  "Balboa Park 18": { 18: { weekday: 39.50, weekend: 49 }, 9: { weekday: 18, weekend: 24 } },
+  "Balboa Park 9":  { 9: { weekday: 18, weekend: 24 } },
+  "Torrey Pines South": { 18: { weekday: 73, weekend: 90 } },
+  "Torrey Pines North": { 18: { weekday: 51, weekend: 68 } },
+};
+
+function residentRate(target, dateStr, holes) {
+  const courseRates = RATE_CARD[target];
+  if (!courseRates) return null;
+  const holesRates = courseRates[holes];
+  if (!holesRates) return null;
+  if (typeof dateStr !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  const [y, mo, d] = dateStr.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, mo - 1, d)).getUTCDay();  // 0=Sun..6=Sat
+  // Balboa: Sat-Sun = weekend.  Torrey: Fri-Sun = weekend.
+  const isWeekend = target.startsWith("Torrey")
+    ? (dow === 0 || dow === 5 || dow === 6)
+    : (dow === 0 || dow === 6);
+  return holesRates[isWeekend ? "weekend" : "weekday"];
 }
 
 // "08:00" -> "8 AM"; "16:30" -> "4:30 PM"; "12:00" -> "12 PM".
