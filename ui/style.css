@@ -318,8 +318,6 @@ main {
 .card-matches {
   border-top: 1px solid var(--rule);
   padding-top: 12px;
-  max-height: 240px;
-  overflow-y: auto;
   position: relative;
 }
 .card-matches::before {
@@ -392,9 +390,6 @@ main {
   border-color: var(--accent-deep);
   background: rgba(201, 169, 106, 0.06);
 }
-
-.card-matches::-webkit-scrollbar { width: 6px; }
-.card-matches::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
 /* ---------- Snapshot meta line --------------------------------------- */
 
@@ -826,7 +821,6 @@ form .hint code {
   main { padding: 18px 12px 48px; }
   .check-card { padding: 16px 14px 14px; }
   .check-card h3.card-name { font-size: 16px; }
-  .card-matches { max-height: none; }
   .edit h2 { font-size: 22px; }
   form fieldset { padding: 10px 12px 12px; }
   #courses-grid { grid-template-columns: 1fr; }
