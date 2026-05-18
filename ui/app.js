@@ -241,7 +241,7 @@ function renderCard({ name, cfg, error }, snapshotEntry) {
   const f = cfg.filter || {};
   const holesStr = (Array.isArray(f.holes) ? f.holes.join(" + ") : (f.holes ?? 18)) + "h";
   const playersStr = `≥${f.min_players ?? 1}p`;
-  const windowsStr = (f.windows || []).map(w => `${shortTime(w.start)}–${shortTime(w.end)}`).join(" · ") || "any time";
+  const windowsStr = (f.windows || []).map(w => `${fmt12h(w.start)}–${fmt12h(w.end)}`).join(" · ") || "any time";
   setMetaRow(article.querySelector(".card-filter"), "Filter", `${holesStr} · ${playersStr} · ${windowsStr}`);
 
   renderCardMatches(article, snapshotEntry);
@@ -303,14 +303,21 @@ function renderCardMatches(article, entry) {
 }
 
 function buildMatchLi(m) {
-  // Two-row layout per match: primary (time + course) on top, secondary
-  // (players/holes/fee/BF) below dimmer. Easier to scan than one wrapping line.
+  // Each match is an <a> wrapping a two-row layout: primary (time + course)
+  // on top, secondary (players/holes/fee/BF) below dimmer. Clicking opens the
+  // ForeUp booking page in a new tab.
   const li = document.createElement("li");
+
+  const link = document.createElement("a");
+  link.className = "match-link";
+  link.href = bookingUrl(m);
+  link.target = "_blank";
+  link.rel = "noopener";
 
   const primary = document.createElement("div");
   primary.className = "match-primary";
   primary.append(
-    mkSpan("match-when", `${formatDate(m.date)} · ${m.time}`),
+    mkSpan("match-when", `${formatDate(m.date)} · ${fmt12h(m.time)}`),
     document.createTextNode(" "),
     mkSpan("match-where", m.target),
   );
@@ -322,8 +329,20 @@ function buildMatchLi(m) {
   meta.className = "match-meta";
   meta.textContent = metaParts.join(" · ");
 
-  li.append(primary, meta);
+  link.append(primary, meta);
+  li.append(link);
   return li;
+}
+
+// ForeUp deep-link: pass date + schedule_id as query params so the SPA can
+// preselect on load. SD City Golf facility id = 19348, booking class 929
+// is the resident 0-7-day class (no booking fee).
+function bookingUrl(m) {
+  const ts = TEESHEETS.find(t => t.label === m.target);
+  const base = "https://foreupsoftware.com/index.php/booking/19348/929";
+  if (!ts || !/^\d{4}-\d{2}-\d{2}$/.test(m.date)) return `${base}#/teetimes`;
+  const [y, mo, d] = m.date.split("-");
+  return `${base}?date=${mo}-${d}-${y}&schedule_id=${ts.id}#/teetimes`;
 }
 
 function mkSpan(cls, text) {
@@ -343,9 +362,17 @@ function formatDate(spec) {
   return `${dow} ${m}/${d}`;
 }
 
-// "08:00" -> "8:00"; "16:00" stays "16:00". 24h, leading-zero stripped.
-function shortTime(t) {
-  return typeof t === "string" ? t.replace(/^0/, "") : t;
+// "08:00" -> "8 AM"; "16:30" -> "4:30 PM"; "12:00" -> "12 PM".
+// Round-hour times drop the ":00" for compactness.
+function fmt12h(t) {
+  if (typeof t !== "string") return t;
+  const m = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return t;
+  let h = parseInt(m[1], 10);
+  const min = m[2];
+  const period = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return min === "00" ? `${h} ${period}` : `${h}:${min} ${period}`;
 }
 
 function setMetaRow(el, label, value) {
