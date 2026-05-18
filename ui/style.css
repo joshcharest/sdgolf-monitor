@@ -536,7 +536,7 @@ form label {
 }
 form label small {
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: 13.5px;
   font-style: italic;
   font-weight: 400;
   font-family: var(--font-display);
@@ -570,14 +570,14 @@ form fieldset legend small {
   color: var(--text-muted);
   font-style: normal;
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: 13px;
   letter-spacing: 0.02em;
   margin-left: 6px;
 }
 form .row { display: flex; flex-wrap: wrap; gap: 14px; }
 form .hint {
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: 13.5px;
   margin: 8px 0 0;
   font-style: italic;
   font-family: var(--font-display);
@@ -589,7 +589,7 @@ form .hint code {
   background: var(--panel-2);
   padding: 1px 5px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-dim);
 }
 
