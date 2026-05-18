@@ -330,7 +330,7 @@ function buildMatchLi(m) {
   );
 
   const fee = m.green_fee == null ? null : `$${Math.round(m.green_fee)}`;
-  const bf = m.booking_fee ? "BF" : null;
+  const bf = m.booking_fee ? "+ Advanced Booking Fee" : null;
   const metaParts = [`${m.available_spots}p`, `${m.holes}h`, fee, bf].filter(Boolean);
   const meta = document.createElement("div");
   meta.className = "match-meta";
