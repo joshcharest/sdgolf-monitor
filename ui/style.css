@@ -43,7 +43,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; overflow-x: clip; }
 
 body {
   font-family: var(--font-body);
@@ -68,8 +68,10 @@ body {
 
 header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: 8px 16px;
   padding: 22px 32px 20px;
   border-bottom: 1px solid var(--border);
   background:
@@ -81,7 +83,8 @@ header {
   z-index: 50;
 }
 
-.brand { display: flex; align-items: center; gap: 14px; }
+.brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.brand-text { min-width: 0; }
 .brand-mark {
   color: var(--accent);
   flex: none;
