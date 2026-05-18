@@ -343,6 +343,15 @@ main {
   overflow-wrap: break-word;
 }
 .card-matches-list li:last-child { border-bottom: none; }
+.card-matches-list li.none {
+  text-align: center;
+  padding: 14px 4px;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 13.5px;
+  border-bottom: none;
+}
 .match-link {
   display: flex;
   flex-direction: column;
