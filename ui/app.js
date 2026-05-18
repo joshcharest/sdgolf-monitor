@@ -302,6 +302,14 @@ function renderCardMatches(article, entry) {
   if (matches.length === 0) {
     summary.textContent = "0 matches";
     summary.classList.add("dim");
+    // Show the AVAILABLE section anyway with a "None" placeholder so the
+    // empty state is clearly "we checked, nothing matched" rather than
+    // "haven't checked yet."
+    const li = document.createElement("li");
+    li.className = "none";
+    li.textContent = "None";
+    list.appendChild(li);
+    wrapper.hidden = false;
     return;
   }
   summary.textContent = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
