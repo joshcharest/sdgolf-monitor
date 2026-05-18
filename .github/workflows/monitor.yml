@@ -1,9 +1,11 @@
 name: monitor
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"   # every 5 minutes (GitHub Actions minimum)
-  workflow_dispatch: {}     # manual trigger from the Actions tab
+  # A Cloudflare Worker cron hits the GitHub dispatch API every 5 min
+  # (see worker.js scheduled handler). GH's own schedule: trigger drifts
+  # by hours under load, so we don't use it. Manual gh workflow run still
+  # works as a self-heal if the Worker is ever broken.
+  workflow_dispatch: {}
 
 concurrency:
   group: monitor
