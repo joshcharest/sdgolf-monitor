@@ -13,7 +13,7 @@ from typing import Any
 
 from . import notify, state
 from .client import ForeUpClient, Target, TeeTime
-from .filter import Filter, Window, date_range, parse_holes, parse_weekdays
+from .filter import Filter, Window, date_range, parse_hhmm, parse_holes, parse_weekdays
 
 log = logging.getLogger("sdgolf")
 
@@ -61,8 +61,8 @@ def run_check_set(
         holes=parse_holes(cfg["filter"].get("holes")),
         windows=tuple(
             Window(
-                start=w["start"],
-                end=w["end"],
+                start=parse_hhmm(w["start"]),
+                end=parse_hhmm(w["end"]),
                 weekdays=parse_weekdays(w.get("weekdays")),
             )
             for w in cfg["filter"]["windows"]
