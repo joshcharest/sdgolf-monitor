@@ -67,3 +67,25 @@ jobs:
             -H "Content-Type: application/json" \
             --data-binary @snapshot.json > /dev/null
           echo "snapshot uploaded ($(wc -c < snapshot.json) bytes)"
+
+      # Guardrail: a run can finish with exit 0 even when every check set
+      # crashed, because main.py catches per-set exceptions. Inspect the
+      # snapshot and fail the job if every enabled set has an error, so
+      # total breakage produces a red X (and the usual Actions failure email)
+      # instead of a silent green tick.
+      - name: Fail if every enabled set errored
+        if: always() && hashFiles('snapshot.json') != ''
+        run: |
+          python <<'PY'
+          import json, sys
+          sets = json.load(open("snapshot.json")).get("sets", {})
+          enabled = {n: s for n, s in sets.items() if s.get("enabled", True)}
+          if not enabled:
+              print("no enabled check sets; nothing to guard")
+              sys.exit(0)
+          errored = [n for n, s in enabled.items() if "error" in s]
+          if len(errored) == len(enabled):
+              print(f"all {len(enabled)} enabled set(s) errored: {errored}")
+              sys.exit(1)
+          print(f"{len(enabled) - len(errored)}/{len(enabled)} enabled set(s) ok")
+          PY
