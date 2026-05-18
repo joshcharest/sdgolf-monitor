@@ -232,7 +232,7 @@ function renderCard({ name, cfg, error }, snapshotEntry) {
   const targets = (cfg.targets || []).map(t => t.name).join(", ");
   article.querySelector(".card-targets").textContent = `Targets: ${targets || "(none)"}`;
   const d = cfg.dates || {};
-  article.querySelector(".card-dates").textContent = `Dates: ${d.start || "?"} → ${d.end || "?"}`;
+  article.querySelector(".card-dates").textContent = `Dates: ${formatDate(d.start) || "?"} → ${formatDate(d.end) || "?"}`;
   const f = cfg.filter || {};
   const windowsSummary = (f.windows || []).map(w => `${w.start}-${w.end}`).join(", ") || "(any time)";
   const holesSummary = Array.isArray(f.holes) ? f.holes.join("+") : (f.holes || 18);
@@ -273,23 +273,45 @@ function renderCardMatches(article, entry) {
   summary.textContent = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
   summary.classList.add("hit");
 
-  // Sort by date then time and cap the list so the card stays compact.
+  // Sort by date then time. Show the first MAX; the rest are revealed on
+  // demand via a "Show N more" button so cards stay compact by default.
   const sorted = matches.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   const MAX = 8;
-  for (const m of sorted.slice(0, MAX)) {
-    const li = document.createElement("li");
-    const fee = m.green_fee == null ? "" : ` $${Math.round(m.green_fee)}`;
-    const bf = m.booking_fee ? "•BF" : "";
-    li.textContent = `${m.date} ${m.time} — ${m.target} (${m.available_spots}p ${m.holes}h${fee}${bf})`;
-    list.appendChild(li);
-  }
+  for (const m of sorted.slice(0, MAX)) list.appendChild(buildMatchLi(m));
   if (sorted.length > MAX) {
-    const li = document.createElement("li");
-    li.className = "more";
-    li.textContent = `…${sorted.length - MAX} more`;
-    list.appendChild(li);
+    const moreLi = document.createElement("li");
+    moreLi.className = "more";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "show-more";
+    const remaining = sorted.length - MAX;
+    btn.textContent = `Show ${remaining} more`;
+    btn.addEventListener("click", () => {
+      moreLi.remove();
+      for (const m of sorted.slice(MAX)) list.appendChild(buildMatchLi(m));
+    });
+    moreLi.appendChild(btn);
+    list.appendChild(moreLi);
   }
   wrapper.hidden = false;
+}
+
+function buildMatchLi(m) {
+  const li = document.createElement("li");
+  const fee = m.green_fee == null ? "" : ` $${Math.round(m.green_fee)}`;
+  const bf = m.booking_fee ? "•BF" : "";
+  li.textContent = `${formatDate(m.date)} ${m.time} — ${m.target} (${m.available_spots}p ${m.holes}h${fee}${bf})`;
+  return li;
+}
+
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// "YYYY-MM-DD" -> "Mon 5/25". Non-ISO inputs (e.g. "today+8") pass through.
+function formatDate(spec) {
+  if (typeof spec !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(spec)) return spec;
+  const [y, m, d] = spec.split("-").map(Number);
+  const dow = DOW[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  return `${dow} ${m}/${d}`;
 }
 
 function renderEdit(existingName) {
