@@ -280,6 +280,12 @@ main {
   font-size: 13px;
   line-height: 1.45;
   color: var(--text-dim);
+  min-width: 0;
+}
+.card-targets .meta-value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .check-card .edit-btn {

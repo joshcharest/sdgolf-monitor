@@ -376,10 +376,9 @@ function fmt12h(t) {
 }
 
 function setMetaRow(el, label, value) {
-  el.replaceChildren(
-    mkSpan("meta-label", label),
-    mkSpan("meta-value", value),
-  );
+  const valueSpan = mkSpan("meta-value", value);
+  valueSpan.title = value;  // full text on hover when truncated
+  el.replaceChildren(mkSpan("meta-label", label), valueSpan);
 }
 
 function renderEdit(existingName) {
