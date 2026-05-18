@@ -69,18 +69,19 @@ async function saveConfig(name, cfg, sha) {
     branch: REPO_BRANCH,
   };
   if (sha) body.sha = sha;
+  let resp;
   try {
-    const resp = await gh("PUT", `/contents/configs/${encodeURIComponent(name)}.yaml`, body);
-    return { sha: resp.content.sha, yaml: yamlText };
+    resp = await gh("PUT", `/contents/configs/${encodeURIComponent(name)}.yaml`, body);
   } catch (e) {
     if (e.status !== 409 || !sha) throw e;
     // 409 = stale sha. Re-fetch the latest sha and retry once. We're a
     // single-user tool so "last write wins" is acceptable.
     const latest = await loadConfig(name);
     body.sha = latest.sha;
-    const resp = await gh("PUT", `/contents/configs/${encodeURIComponent(name)}.yaml`, body);
-    return { sha: resp.content.sha, yaml: yamlText };
+    resp = await gh("PUT", `/contents/configs/${encodeURIComponent(name)}.yaml`, body);
   }
+  triggerDispatch();
+  return { sha: resp.content.sha, yaml: yamlText };
 }
 
 async function deleteConfig(name, sha) {
@@ -89,6 +90,16 @@ async function deleteConfig(name, sha) {
     sha,
     branch: REPO_BRANCH,
   });
+  triggerDispatch();
+}
+
+// Fire-and-forget: tell the Worker to dispatch the monitor workflow right
+// now so the snapshot reflects this config mutation within ~30s instead of
+// waiting up to 5 minutes for the next cron tick.
+function triggerDispatch() {
+  fetch("/api/dispatch", { method: "POST" })
+    .then(r => { if (!r.ok) console.warn(`/api/dispatch ${r.status}`); })
+    .catch(e => console.warn("/api/dispatch", e));
 }
 
 // ----- Views -------------------------------------------------------------
