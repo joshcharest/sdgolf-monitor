@@ -574,16 +574,14 @@ form .hint code {
   border-bottom: 1px dashed var(--border-soft);
 }
 .window-row:last-child { border-bottom: none; }
-.window-row .w-del,
-.custom-target-row .ct-del {
+.window-row .w-del {
   background: transparent;
   border-color: transparent;
   color: var(--text-muted);
   padding: 4px 8px;
   font-size: 14px;
 }
-.window-row .w-del:hover,
-.custom-target-row .ct-del:hover { background: var(--danger); color: var(--accent-fg); }
+.window-row .w-del:hover { background: var(--danger); color: var(--accent-fg); }
 
 .window-row .weekdays { display: flex; gap: 4px; flex-wrap: wrap; }
 .window-row .weekdays label {
@@ -647,22 +645,6 @@ form .hint code {
 
 .booking-class-row { align-items: center; }
 .booking-class-row #booking-class { min-width: 340px; }
-
-.custom-targets { margin-top: 10px; }
-.custom-targets summary {
-  color: var(--text-muted);
-  font-size: 11.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  padding: 6px 0;
-}
-.custom-targets summary:hover { color: var(--text-dim); }
-.custom-target-row {
-  display: flex; gap: 10px; align-items: center; padding: 8px 0;
-}
-.custom-target-row .ct-name { flex: 1 1 180px; min-width: 100px; }
-.custom-target-row .ct-id { flex: 0 0 130px; }
 
 /* ---------- Date input row ------------------------------------------- */
 
@@ -758,7 +740,7 @@ form .hint code {
   .brand-sub { font-size: 10px; letter-spacing: 0.14em; }
   main { padding: 28px 18px 60px; }
   .cards { grid-template-columns: 1fr; }
-  .window-row, .custom-target-row { flex-direction: column; align-items: stretch; }
+  .window-row { flex-direction: column; align-items: stretch; }
   .date-input-row { flex-direction: column; align-items: stretch; }
   .date-input-row .date-label,
   .date-input-row .date-mode { flex: none; }

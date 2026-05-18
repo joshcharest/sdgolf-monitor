@@ -124,11 +124,6 @@
             </label>
             <input type="number" id="booking-class-custom" placeholder="custom id" hidden />
           </div>
-          <details class="custom-targets">
-            <summary>Add custom course (rare — for teesheet ids not in the list)</summary>
-            <div id="custom-targets-list"></div>
-            <button type="button" id="add-custom-target">＋ Add custom course</button>
-          </details>
         </fieldset>
 
         <fieldset>
@@ -169,10 +164,6 @@
               Min players
               <input type="number" name="min-players" min="1" max="4" value="2" />
             </label>
-            <label class="inline">
-              Max green fee
-              <input type="number" name="max-fee" min="0" step="1" placeholder="no cap" />
-            </label>
           </div>
         </fieldset>
 
@@ -191,14 +182,6 @@
       </form>
       <p class="error" id="edit-error" hidden></p>
     </section>
-  </template>
-
-  <template id="custom-target-row">
-    <div class="custom-target-row">
-      <input type="text" class="ct-name" placeholder="Display name" />
-      <input type="number" class="ct-id" placeholder="Teesheet id" />
-      <button type="button" class="ct-del" title="Remove">✕</button>
-    </div>
   </template>
 
   <template id="course-option">

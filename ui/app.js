@@ -299,7 +299,7 @@ function renderEdit(existingName) {
     enabled: true,
     targets: [],
     dates: { start: "today", end: "today+90" },
-    filter: { holes: 18, min_players: 2, max_green_fee: null, windows: [{ start: "07:00", end: "11:00", weekdays: ["sat", "sun"] }] },
+    filter: { holes: 18, min_players: 2, windows: [{ start: "07:00", end: "11:00", weekdays: ["sat", "sun"] }] },
   };
 
   ROOT.innerHTML = "";
@@ -314,7 +314,6 @@ function renderEdit(existingName) {
   form.elements["enabled"].checked = cfg.enabled !== false;
   form.elements["holes"].value = holesToSelectValue(cfg.filter?.holes);
   form.elements["min-players"].value = cfg.filter?.min_players ?? 2;
-  form.elements["max-fee"].value = cfg.filter?.max_green_fee ?? "";
 
   setupTargets(cfg.targets || []);
   setupDateInput(form, "start", cfg.dates?.start || "today");
@@ -397,7 +396,6 @@ function renderEdit(existingName) {
 function setupTargets(targets) {
   const knownIds = new Set(TEESHEETS.map(ts => ts.id));
   const selectedIds = new Set(targets.map(t => t.teesheet_id).filter(id => knownIds.has(id)));
-  const customTargets = targets.filter(t => !knownIds.has(t.teesheet_id));
 
   // Course checkboxes
   const grid = document.getElementById("courses-grid");
@@ -433,23 +431,6 @@ function setupTargets(targets) {
     bcSel.value = "custom"; bcCustom.value = dominantBc; bcCustom.hidden = false;
   }
   bcSel.addEventListener("change", () => { bcCustom.hidden = bcSel.value !== "custom"; });
-
-  // Custom targets (rare — teesheet ids not in TEESHEETS)
-  const customList = document.getElementById("custom-targets-list");
-  const customDetails = customList.closest("details");
-  for (const t of customTargets) customList.appendChild(buildCustomTargetRow(t));
-  if (customTargets.length > 0) customDetails.open = true;
-  document.getElementById("add-custom-target").addEventListener("click", () => {
-    customList.appendChild(buildCustomTargetRow({ name: "", teesheet_id: "" }));
-  });
-}
-
-function buildCustomTargetRow(t) {
-  const node = document.getElementById("custom-target-row").content.cloneNode(true);
-  node.querySelector(".ct-name").value = t.name || "";
-  node.querySelector(".ct-id").value = t.teesheet_id ?? "";
-  node.querySelector(".ct-del").addEventListener("click", (e) => e.target.closest(".custom-target-row").remove());
-  return node;
 }
 
 // Date spec: either "today", "today±N", or an ISO YYYY-MM-DD string.
@@ -504,17 +485,7 @@ function readForm(form) {
     const meta = TEESHEETS.find(ts => ts.id === id);
     targets.push({ name: meta.label, teesheet_id: id, booking_class });
   }
-  for (const row of form.querySelectorAll("#custom-targets-list .custom-target-row")) {
-    const name = row.querySelector(".ct-name").value.trim();
-    const idRaw = row.querySelector(".ct-id").value.trim();
-    if (!name && !idRaw) continue;
-    const teesheet_id = parseInt(idRaw, 10);
-    if (!name || !Number.isFinite(teesheet_id)) {
-      throw new Error("Each custom course needs a name and a numeric teesheet id");
-    }
-    targets.push({ name, teesheet_id, booking_class });
-  }
-  if (targets.length === 0) throw new Error("Select at least one course (or add a custom course)");
+  if (targets.length === 0) throw new Error("Select at least one course");
 
   const windows = [];
   for (const row of form.querySelectorAll("#windows-list .window-row")) {
@@ -532,7 +503,6 @@ function readForm(form) {
   const dateStart = readDateSpec(form, "start");
   const dateEnd = readDateSpec(form, "end");
 
-  const maxFeeRaw = form.elements["max-fee"].value.trim();
   const cfg = {
     enabled: form.elements["enabled"].checked,
     targets,
@@ -540,7 +510,6 @@ function readForm(form) {
     filter: {
       holes: readHoles(form),
       min_players: parseInt(form.elements["min-players"].value, 10),
-      max_green_fee: maxFeeRaw === "" ? null : Number(maxFeeRaw),
       windows,
     },
   };
