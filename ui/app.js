@@ -331,7 +331,13 @@ function buildMatchLi(m) {
 
   const rate = residentRate(m.target, m.green_fee);
   const fee = rate == null ? null : `$${rate % 1 === 0 ? rate : rate.toFixed(2)}`;
-  const bf = m.booking_fee ? "+ Advanced Booking Fee" : null;
+  // Advanced booking fee shown as a separate line item since it's
+  // non-refundable — don't roll it into the green-fee total.
+  let bf = null;
+  if (m.booking_fee) {
+    const amount = ADVANCED_BOOKING_FEE[m.target];
+    bf = amount != null ? `+ $${amount} Advanced Booking Fee` : "+ Advanced Booking Fee";
+  }
   const metaParts = [`${m.available_spots}p`, `${m.holes}`, fee, bf].filter(Boolean);
   const meta = document.createElement("div");
   meta.className = "match-meta";
@@ -411,6 +417,16 @@ function residentRate(target, nonResident) {
   if (typeof nonResident !== "number") return null;
   return RATE_MAP[target]?.[nonResident] ?? null;
 }
+
+// SD City Resident advanced-booking fee, per player (8-90 day window).
+// Source: same rate cards. Non-resident fees are higher ($50 at Torrey) but
+// we always quote the resident number to match the green-fee mapping.
+const ADVANCED_BOOKING_FEE = {
+  "Balboa Park 18":     10,
+  "Balboa Park 9":      10,
+  "Torrey Pines South": 32,
+  "Torrey Pines North": 32,
+};
 
 // "08:00" -> "8 AM"; "16:30" -> "4:30 PM"; "12:00" -> "12 PM".
 // Round-hour times drop the ":00" for compactness.
