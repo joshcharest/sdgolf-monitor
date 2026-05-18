@@ -184,6 +184,7 @@ main {
   flex-direction: column;
   gap: 14px;
   padding: 24px 26px 22px;
+  min-width: 0;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 40%),
     var(--panel);
@@ -757,7 +758,7 @@ form .hint code {
   .brand-sub { font-size: 10px; letter-spacing: 0.14em; }
   header nav { gap: 10px; }
   main { padding: 24px 14px 60px; }
-  .cards { grid-template-columns: 1fr; gap: 14px; }
+  .cards { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .card { padding: 20px 18px; }
   .card.auth { margin: 28px auto; }
   .check-card { padding: 18px 18px 16px; gap: 12px; }
