@@ -342,11 +342,13 @@ function buildMatchLi(m) {
 }
 
 // ForeUp deep-link: pass date + schedule_id as query params so the SPA can
-// preselect on load. SD City Golf facility id = 19348, booking class 929
-// is the resident 0-7-day class (no booking fee).
+// preselect on load. SD City Golf facility id = 19348. Booking class 929 is
+// the resident 0-7-day class (no fee); 51735 is the 8-90-day class (with
+// advanced-booking fee) — route based on whether this slot carries the fee.
 function bookingUrl(m) {
   const ts = TEESHEETS.find(t => t.label === m.target);
-  const base = "https://foreupsoftware.com/index.php/booking/19348/929";
+  const bookingClass = m.booking_fee ? 51735 : 929;
+  const base = `https://foreupsoftware.com/index.php/booking/19348/${bookingClass}`;
   if (!ts || !/^\d{4}-\d{2}-\d{2}$/.test(m.date)) return `${base}#/teetimes`;
   const [y, mo, d] = m.date.split("-");
   return `${base}?date=${mo}-${d}-${y}&schedule_id=${ts.id}#/teetimes`;
