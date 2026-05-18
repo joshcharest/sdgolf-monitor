@@ -69,8 +69,18 @@ async function saveConfig(name, cfg, sha) {
     branch: REPO_BRANCH,
   };
   if (sha) body.sha = sha;
-  const resp = await gh("PUT", `/contents/configs/${encodeURIComponent(name)}.yaml`, body);
-  return { sha: resp.content.sha, yaml: yamlText };
+  try {
+    const resp = await gh("PUT", `/contents/configs/${encodeURIComponent(name)}.yaml`, body);
+    return { sha: resp.content.sha, yaml: yamlText };
+  } catch (e) {
+    if (e.status !== 409 || !sha) throw e;
+    // 409 = stale sha. Re-fetch the latest sha and retry once. We're a
+    // single-user tool so "last write wins" is acceptable.
+    const latest = await loadConfig(name);
+    body.sha = latest.sha;
+    const resp = await gh("PUT", `/contents/configs/${encodeURIComponent(name)}.yaml`, body);
+    return { sha: resp.content.sha, yaml: yamlText };
+  }
 }
 
 async function deleteConfig(name, sha) {
