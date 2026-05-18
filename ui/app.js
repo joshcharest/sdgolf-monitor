@@ -229,20 +229,27 @@ function renderCard({ name, cfg, error }, snapshotEntry) {
     }
   });
 
-  const targetsValue = (cfg.targets || []).map(t => t.name).join(" · ") || "(none)";
-  setMetaRow(article.querySelector(".card-targets"), "Courses", targetsValue);
+  // Each course on its own line — no truncation, no wrapping mid-name.
+  const targetsEl = article.querySelector(".card-targets");
+  const targets = cfg.targets || [];
+  targetsEl.replaceChildren(
+    ...(targets.length ? targets : [{ name: "(none)" }]).map(t => {
+      const div = document.createElement("div");
+      div.textContent = t.name;
+      return div;
+    })
+  );
 
   const d = cfg.dates || {};
   const start = formatDate(d.start) || "?";
   const end = formatDate(d.end) || "?";
-  const datesValue = start === end ? start : `${start} – ${end}`;
-  setMetaRow(article.querySelector(".card-dates"), "Dates", datesValue);
+  article.querySelector(".card-dates").textContent = start === end ? start : `${start} – ${end}`;
 
   const f = cfg.filter || {};
   const holesStr = (Array.isArray(f.holes) ? f.holes.join(" + ") : (f.holes ?? 18)) + "h";
   const playersStr = `≥${f.min_players ?? 1}p`;
   const windowsStr = (f.windows || []).map(w => `${fmt12h(w.start)}–${fmt12h(w.end)}`).join(" · ") || "any time";
-  setMetaRow(article.querySelector(".card-filter"), "Filter", `${holesStr} · ${playersStr} · ${windowsStr}`);
+  article.querySelector(".card-filter").textContent = `${holesStr} · ${playersStr} · ${windowsStr}`;
 
   renderCardMatches(article, snapshotEntry);
 
@@ -375,11 +382,6 @@ function fmt12h(t) {
   return min === "00" ? `${h} ${period}` : `${h}:${min} ${period}`;
 }
 
-function setMetaRow(el, label, value) {
-  const valueSpan = mkSpan("meta-value", value);
-  valueSpan.title = value;  // full text on hover when truncated
-  el.replaceChildren(mkSpan("meta-label", label), valueSpan);
-}
 
 function renderEdit(existingName) {
   const isNew = !existingName;
