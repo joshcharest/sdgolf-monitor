@@ -97,39 +97,44 @@ def test_exception_in_one_set_doesnt_kill_others(tmp_path, monkeypatch, caplog):
     text = caplog.text
     # The broken set raised, was caught, and logged
     assert "[b-broken] check set failed" in text
-    # Both good sets still ran (their first-run seed log appears)
-    assert "[a-good] first run" in text
-    assert "[c-good] first run" in text
+    # Both good sets still ran (StubClient returns no rows → "no new matches")
+    assert "[a-good] no new matches" in text
+    assert "[c-good] no new matches" in text
     # And the orchestrator continued past the broken one
     assert text.index("[b-broken]") < text.index("[c-good]")
 
 
-def test_per_set_state_files_are_isolated(tmp_path):
+def test_per_set_state_files_are_isolated(tmp_path, monkeypatch):
     """Two sets seeing the same time slot keep independent dedup state."""
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     cfg = _config(["A"])
-    # Pre-seed set "alpha" so it's not in first-run mode
-    (state_dir / "alpha.json").write_text("{}")
+
+    # Stub the email sender — we're testing state isolation, not delivery
+    sent: list[dict] = []
+    monkeypatch.setattr(runner.notify, "send_email", lambda **kw: sent.append(kw))
 
     rows = [{"date": "2026-06-01", "time": "08:00"}]
     client = StubClient(by_target={"A": rows})
+    smtp = runner.SmtpCreds(user="u", password="p", to_addr="x@y")
 
+    # Alpha runs dry — finds the slot, "would email", returns without saving
     runner.run_check_set(
         client=client, cfg=cfg, state_path=state_dir / "alpha.json",
         set_name="alpha", dry_run=True, smtp=None,
     )
-    # State write is skipped under dry_run, so alpha.json stays empty
-    assert json.loads((state_dir / "alpha.json").read_text()) == {}
+    assert not (state_dir / "alpha.json").exists()
 
-    # Run beta fresh — its state file doesn't exist yet → first-run seed
+    # Beta runs live — finds the slot, emails, saves state to its own file
     runner.run_check_set(
         client=client, cfg=cfg, state_path=state_dir / "beta.json",
-        set_name="beta", dry_run=False, smtp=None,
+        set_name="beta", dry_run=False, smtp=smtp,
     )
     beta_state = json.loads((state_dir / "beta.json").read_text())
-    # Beta's first-run seeded the slot; alpha state file is untouched
     assert any("A|2026-06-01|08:00" in k for k in beta_state)
+    # Alpha's file was never created — state lives per-set, not shared
+    assert not (state_dir / "alpha.json").exists()
+    assert len(sent) == 1 and sent[0]["set_name"] == "beta"
 
 
 def test_set_name_appears_in_dry_run_subject(tmp_path, caplog):

@@ -86,20 +86,8 @@ def run_check_set(
                 )
                 matches.extend(hits)
 
-    # First-run behavior: seed silently. Without this, the first cron pass
-    # would email a digest of every currently-available slot.
-    first_run = not state_path.exists()
     seen = state.load(state_path)
     new = [t for t in matches if state.mark(seen, t.key)]
-
-    if first_run:
-        log.info(
-            "[%s] first run — seeding state with %d match(es); no email sent",
-            set_name, len(new),
-        )
-        if not dry_run:
-            state.save(state_path, seen)
-        return matches
 
     if not new:
         log.info("[%s] no new matches (%d already known)", set_name, len(matches))
