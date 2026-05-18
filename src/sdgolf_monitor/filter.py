@@ -84,6 +84,23 @@ WEEKDAY_NAMES = {
 }
 
 
+def parse_hhmm(value: object) -> str:
+    """Normalize a HH:MM time to a zero-padded string.
+
+    PyYAML parses unquoted ``16:00`` as the int ``960`` (YAML 1.1 sexagesimal),
+    while ``08:00`` stays a string because the leading zero foils the int regex.
+    Accept either form and produce ``"HH:MM"``.
+    """
+    if isinstance(value, int):
+        if not 0 <= value < 24 * 60:
+            raise ValueError(f"time out of range: {value}")
+        return f"{value // 60:02d}:{value % 60:02d}"
+    if isinstance(value, str):
+        h, _, m = value.partition(":")
+        return f"{int(h):02d}:{int(m):02d}"
+    raise ValueError(f"unrecognized HH:MM value: {value!r}")
+
+
 def parse_weekdays(value: list[str] | None) -> frozenset[int] | None:
     if not value:
         return None
