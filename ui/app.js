@@ -297,25 +297,34 @@ function renderCardMatches(article, entry) {
 }
 
 function buildMatchLi(m) {
-  // Inline spans (not one text node) so the browser can wrap at the gaps
-  // between when / where / meta on narrow screens.
+  // Two-row layout per match: primary (time + course) on top, secondary
+  // (players/holes/fee/BF) below dimmer. Easier to scan than one wrapping line.
   const li = document.createElement("li");
-  const fee = m.green_fee == null ? "" : ` $${Math.round(m.green_fee)}`;
-  const bf = m.booking_fee ? " BF" : "";
-  const parts = [
-    { cls: "match-when", text: `${formatDate(m.date)} ${m.time}` },
-    { cls: "match-sep",  text: "—" },
-    { cls: "match-where", text: m.target },
-    { cls: "match-meta", text: `${m.available_spots}p ${m.holes}h${fee}${bf}` },
-  ];
-  parts.forEach((p, i) => {
-    const span = document.createElement("span");
-    span.className = p.cls;
-    span.textContent = p.text;
-    li.appendChild(span);
-    if (i < parts.length - 1) li.appendChild(document.createTextNode(" "));
-  });
+
+  const primary = document.createElement("div");
+  primary.className = "match-primary";
+  primary.append(
+    mkSpan("match-when", `${formatDate(m.date)} · ${m.time}`),
+    document.createTextNode(" "),
+    mkSpan("match-where", m.target),
+  );
+
+  const fee = m.green_fee == null ? null : `$${Math.round(m.green_fee)}`;
+  const bf = m.booking_fee ? "BF" : null;
+  const metaParts = [`${m.available_spots}p`, `${m.holes}h`, fee, bf].filter(Boolean);
+  const meta = document.createElement("div");
+  meta.className = "match-meta";
+  meta.textContent = metaParts.join(" · ");
+
+  li.append(primary, meta);
   return li;
+}
+
+function mkSpan(cls, text) {
+  const s = document.createElement("span");
+  s.className = cls;
+  s.textContent = text;
+  return s;
 }
 
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

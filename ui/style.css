@@ -257,16 +257,16 @@ main {
 
 .check-card ul.card-meta {
   list-style: none; padding: 0; margin: 0;
-  font-size: 12px;
   letter-spacing: 0.02em;
   color: var(--text-dim);
   display: grid;
-  gap: 3px;
+  gap: 5px;
 }
 .check-card ul.card-meta li {
   padding: 0;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .check-card .edit-btn {
@@ -336,20 +336,30 @@ main {
 .card-matches-list {
   list-style: none; padding: 0; margin: 0;
   font-family: var(--font-mono);
-  font-size: 11.5px;
   color: var(--text);
 }
 .card-matches-list li {
-  padding: 5px 2px;
+  padding: 9px 2px;
   border-bottom: 1px dashed var(--border-soft);
-  line-height: 1.55;
   overflow-wrap: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .card-matches-list li:last-child { border-bottom: none; }
-.match-when  { color: var(--text);      white-space: nowrap; }
-.match-sep   { color: var(--text-muted); }
-.match-where { color: var(--text-dim); }
-.match-meta  { color: var(--text-muted); white-space: nowrap; font-size: 10.5px; }
+.match-primary {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.match-when  { color: var(--accent); white-space: nowrap; }
+.match-where { color: var(--text); }
+.match-meta {
+  font-size: 10.5px;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
 .card-matches-list li.more {
   text-align: center;
   border-bottom: none;
@@ -764,11 +774,11 @@ form .hint code {
   .cards { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .card { padding: 20px 18px; }
   .card.auth { margin: 28px auto; }
-  .check-card { padding: 18px 18px 16px; gap: 12px; }
+  .check-card { padding: 18px 18px 16px; gap: 14px; }
   .check-card h3.card-name { font-size: 17px; }
-  .check-card ul.card-meta li { font-size: 12px; }
-  .card-matches-list { font-size: 12px; }
-  .card-matches-list li { padding: 5px 2px; }
+  .check-card ul.card-meta li { font-size: 12.5px; }
+  .match-primary { font-size: 13px; }
+  .match-meta { font-size: 11px; }
   /* Two-row header: name + toggle on top, chip + edit underneath */
   .check-card header {
     grid-template-columns: 1fr auto;
