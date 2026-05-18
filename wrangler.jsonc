@@ -15,5 +15,8 @@
   ],
   "kv_namespaces": [
     { "binding": "SNAPSHOT_KV", "id": "2ec6225e728d4004bb495a67ae87ad65" }
-  ]
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
 }
