@@ -229,14 +229,20 @@ function renderCard({ name, cfg, error }, snapshotEntry) {
     }
   });
 
-  const targets = (cfg.targets || []).map(t => t.name).join(", ");
-  article.querySelector(".card-targets").textContent = `Targets: ${targets || "(none)"}`;
+  const targetsValue = (cfg.targets || []).map(t => t.name).join(" · ") || "(none)";
+  setMetaRow(article.querySelector(".card-targets"), "Courses", targetsValue);
+
   const d = cfg.dates || {};
-  article.querySelector(".card-dates").textContent = `Dates: ${formatDate(d.start) || "?"} → ${formatDate(d.end) || "?"}`;
+  const start = formatDate(d.start) || "?";
+  const end = formatDate(d.end) || "?";
+  const datesValue = start === end ? start : `${start} – ${end}`;
+  setMetaRow(article.querySelector(".card-dates"), "Dates", datesValue);
+
   const f = cfg.filter || {};
-  const windowsSummary = (f.windows || []).map(w => `${w.start}-${w.end}`).join(", ") || "(any time)";
-  const holesSummary = Array.isArray(f.holes) ? f.holes.join("+") : (f.holes || 18);
-  article.querySelector(".card-filter").textContent = `${holesSummary}h • ≥${f.min_players || 1}p • ${windowsSummary}`;
+  const holesStr = (Array.isArray(f.holes) ? f.holes.join(" + ") : (f.holes ?? 18)) + "h";
+  const playersStr = `≥${f.min_players ?? 1}p`;
+  const windowsStr = (f.windows || []).map(w => `${shortTime(w.start)}–${shortTime(w.end)}`).join(" · ") || "any time";
+  setMetaRow(article.querySelector(".card-filter"), "Filter", `${holesStr} · ${playersStr} · ${windowsStr}`);
 
   renderCardMatches(article, snapshotEntry);
 
@@ -335,6 +341,18 @@ function formatDate(spec) {
   const [y, m, d] = spec.split("-").map(Number);
   const dow = DOW[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
   return `${dow} ${m}/${d}`;
+}
+
+// "08:00" -> "8:00"; "16:00" stays "16:00". 24h, leading-zero stripped.
+function shortTime(t) {
+  return typeof t === "string" ? t.replace(/^0/, "") : t;
+}
+
+function setMetaRow(el, label, value) {
+  el.replaceChildren(
+    mkSpan("meta-label", label),
+    mkSpan("meta-value", value),
+  );
 }
 
 function renderEdit(existingName) {
