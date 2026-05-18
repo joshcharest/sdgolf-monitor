@@ -339,6 +339,7 @@ main {
   padding: 5px 2px;
   border-bottom: 1px dashed var(--border-soft);
   line-height: 1.55;
+  overflow-wrap: break-word;
 }
 .card-matches-list li:last-child { border-bottom: none; }
 .match-when  { color: var(--text);      white-space: nowrap; }
