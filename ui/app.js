@@ -209,7 +209,11 @@ function renderSnapshotMeta(snapshot) {
     meta.textContent = "No snapshot yet — waiting for first cron run";
     return;
   }
-  meta.textContent = `Tee times updated ${relativeTime(snapshot.generated_at)} (${snapshot.generated_at})`;
+  meta.textContent = `Tee times updated ${relativeTime(snapshot.generated_at)} · ${fmtClock(snapshot.generated_at)}`;
+}
+
+function fmtClock(iso) {
+  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 function relativeTime(iso) {
