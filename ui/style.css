@@ -257,35 +257,18 @@ main {
 
 .check-card ul.card-meta {
   list-style: none; padding: 0; margin: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 14px;
-  row-gap: 6px;
-  align-items: baseline;
-}
-.check-card ul.card-meta li {
-  display: contents;
-}
-.meta-label {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  font-variation-settings: 'opsz' 24, 'SOFT' 100;
-}
-.meta-value {
+  display: flex; flex-direction: column;
+  gap: 4px;
   font-family: var(--font-mono);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--text-dim);
-  min-width: 0;
 }
-.card-targets .meta-value {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.check-card ul.card-meta .card-targets {
+  display: flex; flex-direction: column;
+  gap: 2px;
+  color: var(--text);
+  padding-bottom: 4px;
 }
 
 .check-card .edit-btn {
@@ -804,8 +787,8 @@ form .hint code {
   .card.auth { margin: 28px auto; }
   .check-card { padding: 18px 18px 16px; gap: 14px; }
   .check-card h3.card-name { font-size: 18px; }
-  .check-card ul.card-meta { column-gap: 12px; row-gap: 7px; }
-  .meta-value { font-size: 13.5px; }
+  .check-card ul.card-meta { font-size: 13.5px; gap: 5px; }
+  .check-card ul.card-meta .card-targets { gap: 3px; padding-bottom: 5px; }
   .match-primary { font-size: 14px; }
   .match-meta { font-size: 11.5px; }
   /* Two-row header: name + toggle on top, chip + edit underneath */
