@@ -724,7 +724,7 @@ form .hint code {
 
 .hint { color: var(--text-dim); font-size: 13px; }
 .card.auth p { color: var(--text-dim); }
-.card.auth p a, header nav a#repo-link { color: var(--link); }
+.card.auth p a { color: var(--link); }
 .card.auth p a:hover { color: var(--accent); }
 
 #auth-form {
