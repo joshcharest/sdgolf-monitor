@@ -277,7 +277,7 @@ main {
 }
 .meta-value {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
   color: var(--text-dim);
 }
@@ -352,23 +352,32 @@ main {
   color: var(--text);
 }
 .card-matches-list li {
-  padding: 9px 2px;
   border-bottom: 1px dashed var(--border-soft);
   overflow-wrap: break-word;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 .card-matches-list li:last-child { border-bottom: none; }
+.match-link {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 4px;
+  text-decoration: none;
+  color: inherit;
+  border-radius: var(--radius);
+  transition: background 0.15s, color 0.15s;
+}
+.match-link:hover { background: rgba(201, 169, 106, 0.06); }
+.match-link:hover .match-when  { color: var(--link); }
+.match-link:hover .match-where { color: var(--accent); }
 .match-primary {
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.4;
   color: var(--text);
 }
-.match-when  { color: var(--accent); white-space: nowrap; }
-.match-where { color: var(--text); }
+.match-when  { color: var(--accent); white-space: nowrap; transition: color 0.15s; }
+.match-where { color: var(--text); transition: color 0.15s; }
 .match-meta {
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.4;
   letter-spacing: 0.06em;
   color: var(--text-muted);
@@ -788,11 +797,11 @@ form .hint code {
   .card { padding: 20px 18px; }
   .card.auth { margin: 28px auto; }
   .check-card { padding: 18px 18px 16px; gap: 14px; }
-  .check-card h3.card-name { font-size: 17px; }
+  .check-card h3.card-name { font-size: 18px; }
   .check-card ul.card-meta { column-gap: 12px; row-gap: 7px; }
-  .meta-value { font-size: 12.5px; }
-  .match-primary { font-size: 13px; }
-  .match-meta { font-size: 11px; }
+  .meta-value { font-size: 13.5px; }
+  .match-primary { font-size: 14px; }
+  .match-meta { font-size: 11.5px; }
   /* Two-row header: name + toggle on top, chip + edit underneath */
   .check-card header {
     grid-template-columns: 1fr auto;
