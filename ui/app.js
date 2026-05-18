@@ -338,7 +338,8 @@ function buildMatchLi(m) {
     const amount = ADVANCED_BOOKING_FEE[m.target];
     bf = amount != null ? `+ $${amount} Advanced Booking Fee` : "+ Advanced Booking Fee";
   }
-  const metaParts = [`${m.available_spots}p`, `${m.holes}`, fee, bf].filter(Boolean);
+  const money = [fee, bf].filter(Boolean).join(" ");
+  const metaParts = [`${m.available_spots}p`, `${m.holes}`, money].filter(Boolean);
   const meta = document.createElement("div");
   meta.className = "match-meta";
   meta.textContent = metaParts.join(" · ");
