@@ -271,7 +271,8 @@ main {
   padding-bottom: 4px;
 }
 
-.check-card .edit-btn {
+.check-card .edit-btn,
+.check-card .subscribe-btn {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -281,11 +282,32 @@ main {
   padding: 5px 11px;
   transition: color 0.18s, border-color 0.18s, background 0.18s;
 }
-.check-card .edit-btn:hover {
+.check-card .edit-btn:hover,
+.check-card .subscribe-btn:hover {
   color: var(--accent);
   border-color: var(--accent-deep);
   background: rgba(201, 169, 106, 0.06);
 }
+.check-card .subscribe-btn.subscribed {
+  color: var(--hit);
+  border-color: var(--hit);
+}
+.check-card .subscribe-btn.subscribed:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(198, 106, 74, 0.06);
+}
+
+.check-card .card-owner {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  margin: 0;
+  padding: 0;
+}
+.check-card .card-owner.mine { color: var(--accent); }
 
 /* Match chip */
 .card-matches-summary {
@@ -772,10 +794,50 @@ form .hint code {
 .card.auth p a { color: var(--link); }
 .card.auth p a:hover { color: var(--accent); }
 
-#auth-form {
-  display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap;
+.auth-tabs {
+  display: flex; gap: 4px;
+  margin: 0 0 18px;
+  border-bottom: 1px solid var(--border);
 }
-#auth-form input { flex: 1 1 280px; font-family: var(--font-mono); }
+.auth-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 8px 16px;
+  margin-bottom: -1px;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.auth-tab:hover { color: var(--text-dim); background: transparent; }
+.auth-tab.active {
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.auth-form { display: flex; flex-direction: column; gap: 6px; }
+.auth-form .hint { margin-bottom: 6px; }
+.auth-form label { margin: 8px 0 4px; }
+.auth-form button.primary { margin-top: 14px; align-self: flex-start; }
+
+.user-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+}
+@media (max-width: 480px) {
+  .user-badge { font-size: 10.5px; padding: 4px 8px; }
+}
 
 /* ---------- Responsive ------------------------------------------------ */
 
@@ -803,7 +865,8 @@ form .hint code {
   .check-card h3.card-name           { grid-column: 1; grid-row: 1; }
   .check-card .toggle                { grid-column: 2; grid-row: 1; }
   .check-card .card-matches-summary  { grid-column: 1; grid-row: 2; justify-self: start; }
-  .check-card .edit-btn              { grid-column: 2; grid-row: 2; justify-self: end; }
+  .check-card .edit-btn,
+  .check-card .subscribe-btn         { grid-column: 2; grid-row: 2; justify-self: end; }
   .window-row { flex-direction: column; align-items: stretch; }
   .date-input-row { flex-direction: column; align-items: stretch; }
   .date-input-row .date-label,

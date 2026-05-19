@@ -1,19 +1,20 @@
-// sdgolf-monitor UI — static SPA editing configs/*.yaml via the GitHub REST API.
+// sdgolf-monitor UI — static SPA that talks to the Cloudflare Worker.
 //
 // One module, no framework, no build step. State held in module-level vars;
-// views rendered by cloning <template> elements.
+// views rendered by cloning <template> elements. Auth is an HttpOnly session
+// cookie set by the Worker on login/signup, so no tokens live in localStorage.
 
-import { REPO_OWNER, REPO_NAME, REPO_BRANCH, TEESHEETS, BOOKING_CLASSES } from "./schema.js";
+import { TEESHEETS, BOOKING_CLASSES } from "./schema.js";
 
-const PAT_KEY = "sdgolf-monitor.gh-pat";
 const ROOT = document.getElementById("root");
 const NEW_BTN = document.getElementById("new-btn");
 const SIGNOUT_BTN = document.getElementById("signout-btn");
+const USER_BADGE = document.getElementById("user-badge");
 const TOAST = document.getElementById("toast");
 
-// In-memory cache of configs we've loaded this session: name → { sha, cfg, yaml }
+// In-memory cache of configs we've loaded this session: id → cfg object
 const CACHE = new Map();
-let TOKEN = localStorage.getItem(PAT_KEY) || null;
+let USER = null;  // { email } once signed in
 
 // ----- Toast -------------------------------------------------------------
 
@@ -26,72 +27,37 @@ function toast(msg, kind = "info") {
   toastTimer = setTimeout(() => { TOAST.hidden = true; }, kind === "error" ? 6000 : 3000);
 }
 
-// ----- GitHub API --------------------------------------------------------
+// ----- API ---------------------------------------------------------------
 
-async function gh(method, path, body) {
-  const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}${path}`;
-  const headers = {
-    "Authorization": `Bearer ${TOKEN}`,
-    "Accept": "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
+async function api(method, path, body) {
+  const opts = {
+    method,
+    credentials: "same-origin",  // include cookies
+    headers: body ? { "content-type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
   };
-  if (body) headers["Content-Type"] = "application/json";
-  const resp = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const resp = await fetch(path, opts);
   if (!resp.ok) {
-    const text = await resp.text();
-    const err = new Error(`${method} ${path} → HTTP ${resp.status}`);
+    let parsed = {};
+    try { parsed = await resp.json(); } catch { /* ignore */ }
+    const err = new Error(parsed.error || `${method} ${path} → HTTP ${resp.status}`);
     err.status = resp.status;
-    err.body = text;
     throw err;
   }
   if (resp.status === 204) return null;
   return resp.json();
 }
 
-async function listConfigs() {
-  const items = await gh("GET", `/contents/configs?ref=${REPO_BRANCH}`);
-  return items.filter(it => it.type === "file" && it.name.endsWith(".yaml"));
-}
-
-async function loadConfig(name) {
-  const data = await gh("GET", `/contents/configs/${encodeURIComponent(name)}.yaml?ref=${REPO_BRANCH}`);
-  // GitHub returns base64-encoded content with newlines.
-  const text = atob(data.content.replace(/\n/g, ""));
-  const cfg = jsyaml.load(text);
-  return { sha: data.sha, cfg, yaml: text };
-}
-
-async function saveConfig(name, cfg, sha) {
-  const yamlText = jsyaml.dump(cfg, { lineWidth: -1, noCompatMode: true });
-  const body = {
-    message: `${sha ? "update" : "create"} configs/${name}.yaml via UI`,
-    content: btoa(unescape(encodeURIComponent(yamlText))),  // utf-8 → base64
-    branch: REPO_BRANCH,
-  };
-  if (sha) body.sha = sha;
-  let resp;
-  try {
-    resp = await gh("PUT", `/contents/configs/${encodeURIComponent(name)}.yaml`, body);
-  } catch (e) {
-    if (e.status !== 409 || !sha) throw e;
-    // 409 = stale sha. Re-fetch the latest sha and retry once. We're a
-    // single-user tool so "last write wins" is acceptable.
-    const latest = await loadConfig(name);
-    body.sha = latest.sha;
-    resp = await gh("PUT", `/contents/configs/${encodeURIComponent(name)}.yaml`, body);
-  }
-  triggerDispatch();
-  return { sha: resp.content.sha, yaml: yamlText };
-}
-
-async function deleteConfig(name, sha) {
-  await gh("DELETE", `/contents/configs/${encodeURIComponent(name)}.yaml`, {
-    message: `delete configs/${name}.yaml via UI`,
-    sha,
-    branch: REPO_BRANCH,
-  });
-  triggerDispatch();
-}
+const apiMe        = ()                  => api("GET",    "/api/me");
+const apiLogin     = (email, password)   => api("POST",   "/api/auth/login",  { email, password });
+const apiSignup    = (email, password, c) => api("POST",  "/api/auth/signup", { email, password, invite_code: c });
+const apiLogout    = ()                  => api("POST",   "/api/auth/logout");
+const apiListConfigs   = ()              => api("GET",    "/api/configs");
+const apiCreateConfig  = (cfg)           => api("POST",   "/api/configs", cfg);
+const apiUpdateConfig  = (id, cfg)       => api("PUT",    `/api/configs/${id}`, cfg);
+const apiDeleteConfig  = (id)            => api("DELETE", `/api/configs/${id}`);
+const apiSubscribe     = (id)            => api("POST",   `/api/configs/${id}/subscribe`);
+const apiUnsubscribe   = (id)            => api("POST",   `/api/configs/${id}/unsubscribe`);
 
 // Fire-and-forget: tell the Worker to dispatch the monitor workflow right
 // now so the snapshot reflects this config mutation within ~30s instead of
@@ -106,32 +72,64 @@ function triggerDispatch() {
 
 function setNav({ showNew = false } = {}) {
   NEW_BTN.hidden = !showNew;
-  SIGNOUT_BTN.hidden = !TOKEN;
+  SIGNOUT_BTN.hidden = !USER;
+  USER_BADGE.hidden = !USER;
+  if (USER) USER_BADGE.textContent = USER.email;
 }
 
 function renderAuth() {
+  USER = null;
+  CACHE.clear();
   ROOT.innerHTML = "";
   const view = document.getElementById("auth-view").content.cloneNode(true);
   ROOT.appendChild(view);
   setNav({ showNew: false });
 
-  const form = document.getElementById("auth-form");
+  const loginForm = document.getElementById("login-form");
+  const signupForm = document.getElementById("signup-form");
   const err = document.getElementById("auth-error");
-  form.addEventListener("submit", async (e) => {
+
+  for (const tab of document.querySelectorAll(".auth-tab")) {
+    tab.addEventListener("click", () => {
+      for (const t of document.querySelectorAll(".auth-tab")) t.classList.remove("active");
+      tab.classList.add("active");
+      const which = tab.dataset.tab;
+      loginForm.hidden = which !== "login";
+      signupForm.hidden = which !== "signup";
+      err.hidden = true;
+    });
+  }
+
+  loginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     err.hidden = true;
-    const pat = document.getElementById("pat-input").value.trim();
-    if (!pat) return;
-    TOKEN = pat;
+    const fd = new FormData(loginForm);
     try {
-      // Validate by listing the repo root.
-      await gh("GET", `/contents/?ref=${REPO_BRANCH}`);
-      localStorage.setItem(PAT_KEY, pat);
-      toast("Signed in");
+      const r = await apiLogin(fd.get("email").trim().toLowerCase(), fd.get("password"));
+      USER = r;
+      toast(`Signed in as ${r.email}`);
       renderList();
-    } catch (e) {
-      TOKEN = null;
-      err.textContent = `Token check failed: ${e.message}. Verify the token has Contents read/write on this repo.`;
+    } catch (e2) {
+      err.textContent = e2.message;
+      err.hidden = false;
+    }
+  });
+
+  signupForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.hidden = true;
+    const fd = new FormData(signupForm);
+    try {
+      const r = await apiSignup(
+        fd.get("email").trim().toLowerCase(),
+        fd.get("password"),
+        fd.get("invite_code").trim(),
+      );
+      USER = r;
+      toast(`Welcome, ${r.email}`);
+      renderList();
+    } catch (e2) {
+      err.textContent = e2.message;
       err.hidden = false;
     }
   });
@@ -141,21 +139,13 @@ async function renderList() {
   ROOT.innerHTML = "<p class='loading'>Loading check sets…</p>";
   setNav({ showNew: true });
 
-  let items;
+  let configs;
   try {
-    items = await listConfigs();
+    configs = await apiListConfigs();
   } catch (e) {
-    if (e.status === 401 || e.status === 403) {
-      localStorage.removeItem(PAT_KEY);
-      TOKEN = null;
-      return renderAuth();
-    }
-    if (e.status === 404) {
-      items = [];  // configs/ may not exist yet
-    } else {
-      ROOT.innerHTML = `<p class='error'>Failed to list configs: ${e.message}</p>`;
-      return;
-    }
+    if (e.status === 401) return renderAuth();
+    ROOT.innerHTML = `<p class='error'>Failed to list configs: ${e.message}</p>`;
+    return;
   }
 
   const view = document.getElementById("list-view").content.cloneNode(true);
@@ -164,31 +154,21 @@ async function renderList() {
 
   const cardsEl = document.getElementById("cards");
   const emptyEl = document.getElementById("cards-empty");
-  if (items.length === 0) {
+
+  const snapshot = await loadSnapshot();
+  renderSnapshotMeta(snapshot);
+  const setsById = snapshot?.sets || {};
+
+  for (const cfg of configs) CACHE.set(cfg.id, cfg);
+
+  if (configs.length === 0) {
     emptyEl.hidden = false;
     return;
   }
 
-  // Load configs and the snapshot in parallel — the snapshot is "nice to
-  // have" and shouldn't block the card list if KV isn't wired up yet.
-  const [loaded, snapshot] = await Promise.all([
-    Promise.all(items.map(async (it) => {
-      const name = it.name.replace(/\.yaml$/, "");
-      try {
-        const data = await loadConfig(name);
-        CACHE.set(name, data);
-        return { name, ...data };
-      } catch (e) {
-        return { name, error: e.message };
-      }
-    })),
-    loadSnapshot(),
-  ]);
-
-  renderSnapshotMeta(snapshot);
-  const setsBySet = snapshot?.sets || {};
-  for (const item of loaded.sort((a, b) => a.name.localeCompare(b.name))) {
-    cardsEl.appendChild(renderCard(item, setsBySet[item.name]));
+  configs.sort((a, b) => a.name.localeCompare(b.name));
+  for (const cfg of configs) {
+    cardsEl.appendChild(renderCard(cfg, setsById[cfg.id]));
   }
 }
 
@@ -227,32 +207,61 @@ function relativeTime(iso) {
   return `${Math.round(hr / 24)} d ago`;
 }
 
-function renderCard({ name, cfg, error }, snapshotEntry) {
+function renderCard(cfg, snapshotEntry) {
   const node = document.getElementById("card").content.cloneNode(true);
   const article = node.querySelector("article");
-  article.querySelector(".card-name").textContent = name;
-  if (error) {
-    article.querySelector(".card-desc").textContent = `(failed to load: ${error})`;
-    return node;
-  }
+  article.querySelector(".card-name").textContent = cfg.name;
+  const ownerEl = article.querySelector(".card-owner");
+  ownerEl.textContent = cfg.owner === USER.email ? "yours" : `by ${cfg.owner}`;
+  ownerEl.classList.toggle("mine", cfg.owner === USER.email);
+
   const enabled = cfg.enabled !== false;
   if (!enabled) article.classList.add("disabled");
+
+  const isOwner = cfg.owner === USER.email;
+  const editBtn = article.querySelector(".edit-btn");
+  const subscribeBtn = article.querySelector(".subscribe-btn");
+  const toggleLabel = article.querySelector(".toggle");
   const toggle = article.querySelector(".enabled-toggle");
-  toggle.checked = enabled;
-  toggle.addEventListener("change", async () => {
-    const cached = CACHE.get(name);
-    if (!cached) return;
-    const newCfg = { ...cached.cfg, enabled: toggle.checked };
-    try {
-      const { sha, yaml } = await saveConfig(name, newCfg, cached.sha);
-      CACHE.set(name, { sha, cfg: newCfg, yaml });
-      article.classList.toggle("disabled", !toggle.checked);
-      toast(`${name}: ${toggle.checked ? "enabled" : "disabled"}`);
-    } catch (e) {
-      toggle.checked = !toggle.checked;  // revert
-      toast(`Could not toggle: ${e.message}`, "error");
-    }
-  });
+
+  if (isOwner) {
+    editBtn.hidden = false;
+    toggleLabel.hidden = false;
+    toggle.checked = enabled;
+    editBtn.addEventListener("click", () => renderEdit(cfg.id));
+    toggle.addEventListener("change", async () => {
+      const cached = CACHE.get(cfg.id);
+      if (!cached) return;
+      const next = { ...cached, enabled: toggle.checked };
+      try {
+        const saved = await apiUpdateConfig(cfg.id, next);
+        CACHE.set(cfg.id, saved);
+        article.classList.toggle("disabled", !toggle.checked);
+        triggerDispatch();
+        toast(`${cfg.name}: ${toggle.checked ? "enabled" : "disabled"}`);
+      } catch (e) {
+        toggle.checked = !toggle.checked;  // revert
+        toast(`Could not toggle: ${e.message}`, "error");
+      }
+    });
+  } else {
+    subscribeBtn.hidden = false;
+    const subscribed = (cfg.subscribers || []).includes(USER.email);
+    subscribeBtn.textContent = subscribed ? "Unsubscribe" : "Subscribe";
+    subscribeBtn.classList.toggle("subscribed", subscribed);
+    subscribeBtn.addEventListener("click", async () => {
+      subscribeBtn.disabled = true;
+      try {
+        const updated = (subscribed ? await apiUnsubscribe(cfg.id) : await apiSubscribe(cfg.id));
+        CACHE.set(cfg.id, updated);
+        toast(subscribed ? `Unsubscribed from ${cfg.name}` : `Subscribed to ${cfg.name}`);
+        renderList();
+      } catch (e) {
+        toast(`Could not ${subscribed ? "unsubscribe" : "subscribe"}: ${e.message}`, "error");
+        subscribeBtn.disabled = false;
+      }
+    });
+  }
 
   // Each course on its own line — no truncation, no wrapping mid-name.
   const targetsEl = article.querySelector(".card-targets");
@@ -277,8 +286,6 @@ function renderCard({ name, cfg, error }, snapshotEntry) {
   article.querySelector(".card-filter").textContent = `${holesStr} · ${playersStr} · ${windowsStr}`;
 
   renderCardMatches(article, snapshotEntry);
-
-  article.querySelector(".edit-btn").addEventListener("click", () => renderEdit(name));
   return node;
 }
 
@@ -306,9 +313,6 @@ function renderCardMatches(article, entry) {
   if (matches.length === 0) {
     summary.textContent = "0 matches";
     summary.classList.add("dim");
-    // Show the AVAILABLE section anyway with a "None" placeholder so the
-    // empty state is clearly "we checked, nothing matched" rather than
-    // "haven't checked yet."
     const li = document.createElement("li");
     li.className = "none";
     li.textContent = "None";
@@ -319,8 +323,6 @@ function renderCardMatches(article, entry) {
   summary.textContent = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
   summary.classList.add("hit");
 
-  // Sort by date then time. Show the first MAX; the rest are revealed on
-  // demand via a "Show N more" button so cards stay compact by default.
   const sorted = matches.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   const MAX = 8;
   for (const m of sorted.slice(0, MAX)) list.appendChild(buildMatchLi(m));
@@ -343,9 +345,6 @@ function renderCardMatches(article, entry) {
 }
 
 function buildMatchLi(m) {
-  // Each match is an <a> wrapping a two-row layout: primary (time + course)
-  // on top, secondary (players/holes/fee/BF) below dimmer. Clicking opens the
-  // ForeUp booking page in a new tab.
   const li = document.createElement("li");
 
   const link = document.createElement("a");
@@ -364,12 +363,6 @@ function buildMatchLi(m) {
 
   const rate = residentRate(m.target, m.green_fee);
   const fee = rate == null ? null : `$${rate % 1 === 0 ? rate : rate.toFixed(2)}`;
-  // Advanced booking fee shown as a separate line item since it's
-  // non-refundable — don't roll it into the green-fee total. We infer
-  // applicability from the date (8+ days out → resident 8-90 day class
-  // → fee applies) rather than trusting m.booking_fee, because ForeUp
-  // returns booking_fee_required=false for Torrey slots queried via
-  // booking class 929 even when they're 30+ days out.
   let bf = null;
   if (hasAdvancedBookingFee(m)) {
     const amount = ADVANCED_BOOKING_FEE[m.target];
@@ -386,10 +379,6 @@ function buildMatchLi(m) {
   return li;
 }
 
-// ForeUp deep-link: pass date + schedule_id as query params so the SPA can
-// preselect on load. SD City Golf facility id = 19348. Booking class 929 is
-// the resident 0-7-day class (no fee); 51735 is the 8-90-day class (with
-// advanced-booking fee) — route based on whether this slot carries the fee.
 function bookingUrl(m) {
   const ts = TEESHEETS.find(t => t.label === m.target);
   const bookingClass = m.booking_fee ? 51735 : 929;
@@ -408,7 +397,6 @@ function mkSpan(cls, text) {
 
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-// "YYYY-MM-DD" -> "Mon 5/25". Non-ISO inputs (e.g. "today+8") pass through.
 function formatDate(spec) {
   if (typeof spec !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(spec)) return spec;
   const [y, m, d] = spec.split("-").map(Number);
@@ -418,9 +406,6 @@ function formatDate(spec) {
 
 // Map ForeUp's published (non-resident) green-fee to the SD City Resident
 // equivalent, per course. Source: sandiegocitygolf.com rate cards (2026).
-// Inheriting ForeUp's price as the key lets us reuse their weekday/weekend/
-// twilight logic automatically — we just enumerate the prices we observe.
-// Unmapped non-resident prices fall through (no price displayed).
 const RATE_MAP = {
   "Balboa Park 18": {
     56.50: 39.50,   // weekday 18
@@ -436,18 +421,10 @@ const RATE_MAP = {
     25.50: 18, 32: 24, 19.50: 17,
   },
   "Torrey Pines South": {
-    258: 73,   // weekday 18
-    180: 73,   // weekday 18 junior (resident same as regular)
-    156: 44,   // weekday 18 twilight
-    322: 90,   // weekend 18 all players
-    194: 54,   // weekend 18 twilight
+    258: 73, 180: 73, 156: 44, 322: 90, 194: 54,
   },
   "Torrey Pines North": {
-    163: 51,   // weekday 18
-    114: 51,   // weekday 18 junior
-    97:  33,   // weekday 18 twilight
-    204: 68,   // weekend 18 all players
-    123: 39,   // weekend twilight OR back-9 6:30am Sat/Sun
+    163: 51, 114: 51, 97: 33, 204: 68, 123: 39,
   },
 };
 
@@ -456,9 +433,6 @@ function residentRate(target, nonResident) {
   return RATE_MAP[target]?.[nonResident] ?? null;
 }
 
-// SD City Resident advanced-booking fee, per player (8-90 day window).
-// Source: same rate cards. Non-resident fees are higher ($50 at Torrey) but
-// we always quote the resident number to match the green-fee mapping.
 const ADVANCED_BOOKING_FEE = {
   "Balboa Park 18":     10,
   "Balboa Park 9":      10,
@@ -466,24 +440,18 @@ const ADVANCED_BOOKING_FEE = {
   "Torrey Pines North": 32,
 };
 
-// True when the slot falls in the SD resident 8-90 day booking window, where
-// the advanced fee applies regardless of which booking class was queried.
 function hasAdvancedBookingFee(m) {
   if (typeof m.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(m.date)) {
-    return Boolean(m.booking_fee);  // fallback to API flag if date is funky
+    return Boolean(m.booking_fee);
   }
   const [y, mo, d] = m.date.split("-").map(Number);
   const slot = Date.UTC(y, mo - 1, d);
-  // Use the browser's local date (course-local Pacific time) for "today" so
-  // the 8-day cutoff doesn't shift at midnight UTC (which is 4-5 PM Pacific).
   const today = new Date();
   const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   const days = Math.round((slot - todayUtc) / 86400000);
   return days >= 8;
 }
 
-// "08:00" -> "8 AM"; "16:30" -> "4:30 PM"; "12:00" -> "12 PM".
-// Round-hour times drop the ":00" for compactness.
 function fmt12h(t) {
   if (typeof t !== "string") return t;
   const m = t.match(/^(\d{1,2}):(\d{2})$/);
@@ -495,11 +463,20 @@ function fmt12h(t) {
   return min === "00" ? `${h} ${period}` : `${h}:${min} ${period}`;
 }
 
+// ----- Edit view ---------------------------------------------------------
 
-function renderEdit(existingName) {
-  const isNew = !existingName;
-  const cached = existingName ? CACHE.get(existingName) : null;
-  const cfg = cached?.cfg || {
+function renderEdit(existingId) {
+  const cached = existingId ? CACHE.get(existingId) : null;
+  if (existingId && !cached) {
+    toast("Could not find that check set", "error");
+    return renderList();
+  }
+  if (cached && cached.owner !== USER.email) {
+    toast("You can only edit your own check sets", "error");
+    return renderList();
+  }
+
+  const cfg = cached || {
     enabled: true,
     targets: [],
     dates: { start: "today", end: "today+90" },
@@ -511,10 +488,11 @@ function renderEdit(existingName) {
   ROOT.appendChild(view);
   setNav({ showNew: false });
 
-  document.getElementById("edit-title").textContent = isNew ? "New check set" : `Edit ${existingName}`;
+  const isNew = !existingId;
+  document.getElementById("edit-title").textContent = isNew ? "New check set" : `Edit ${cfg.name}`;
 
   const form = document.getElementById("edit-form");
-  form.elements["name"].value = existingName || "";
+  form.elements["name"].value = cfg.name || "";
   form.elements["enabled"].checked = cfg.enabled !== false;
   form.elements["holes"].value = holesToSelectValue(cfg.filter?.holes);
   form.elements["min-players"].value = cfg.filter?.min_players ?? 2;
@@ -535,11 +513,12 @@ function renderEdit(existingName) {
   if (!isNew) {
     deleteBtn.hidden = false;
     deleteBtn.addEventListener("click", async () => {
-      if (!confirm(`Delete check set "${existingName}"? This commits a deletion to the repo.`)) return;
+      if (!confirm(`Delete check set "${cfg.name}"?`)) return;
       try {
-        await deleteConfig(existingName, cached.sha);
-        CACHE.delete(existingName);
-        toast(`Deleted ${existingName}`);
+        await apiDeleteConfig(existingId);
+        CACHE.delete(existingId);
+        triggerDispatch();
+        toast(`Deleted ${cfg.name}`);
         renderList();
       } catch (e) {
         toast(`Delete failed: ${e.message}`, "error");
@@ -554,42 +533,17 @@ function renderEdit(existingName) {
     const submitBtn = form.querySelector("button[type=submit]");
     try {
       const newCfg = readForm(form);
-      const newName = form.elements["name"].value.trim();
-      if (!newName) throw new Error("Name is required");
-      const isRename = !isNew && newName !== existingName;
       submitBtn.disabled = true;
       submitBtn.textContent = "Saving…";
-
-      if (isRename) {
-        if (!confirm(
-          `Rename "${existingName}" → "${newName}"?\n\n` +
-          `This commits a new file and deletes the old one. ` +
-          `Dedup state will reset, so the next run treats this as a first run and won't email.`
-        )) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = "Save";
-          return;
-        }
-        // Create-not-clobber: PUT without sha fails (422) if the target exists.
-        const created = await saveConfig(newName, newCfg, null);
-        try {
-          await deleteConfig(existingName, cached.sha);
-        } catch (e) {
-          // New file is up but old file is still there. Don't silently lose this.
-          throw new Error(`Renamed to ${newName} but failed to delete ${existingName}: ${e.message}. Delete it manually.`);
-        }
-        CACHE.delete(existingName);
-        CACHE.set(newName, { sha: created.sha, cfg: newCfg, yaml: created.yaml });
-        toast(`Renamed ${existingName} → ${newName}`);
-      } else {
-        const name = isNew ? newName : existingName;
-        const { sha, yaml } = await saveConfig(name, newCfg, cached?.sha);
-        CACHE.set(name, { sha, cfg: newCfg, yaml });
-        toast(`Saved ${name}`);
-      }
+      const saved = isNew
+        ? await apiCreateConfig(newCfg)
+        : await apiUpdateConfig(existingId, newCfg);
+      CACHE.set(saved.id, saved);
+      triggerDispatch();
+      toast(`Saved ${saved.name}`);
       renderList();
-    } catch (e) {
-      errEl.textContent = `Save failed: ${e.message}`;
+    } catch (e2) {
+      errEl.textContent = `Save failed: ${e2.message}`;
       errEl.hidden = false;
       submitBtn.disabled = false;
       submitBtn.textContent = "Save";
@@ -601,7 +555,6 @@ function setupTargets(targets) {
   const knownIds = new Set(TEESHEETS.map(ts => ts.id));
   const selectedIds = new Set(targets.map(t => t.teesheet_id).filter(id => knownIds.has(id)));
 
-  // Course checkboxes
   const grid = document.getElementById("courses-grid");
   for (const ts of TEESHEETS) {
     const node = document.getElementById("course-option").content.cloneNode(true);
@@ -612,8 +565,6 @@ function setupTargets(targets) {
     grid.appendChild(node);
   }
 
-  // Booking class: shared across all targets in this set. Pick from the
-  // first target if any; otherwise default to 929 (the common case).
   const bcCounts = new Map();
   for (const t of targets) bcCounts.set(t.booking_class, (bcCounts.get(t.booking_class) || 0) + 1);
   const dominantBc = [...bcCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 929;
@@ -637,9 +588,6 @@ function setupTargets(targets) {
   bcSel.addEventListener("change", () => { bcCustom.hidden = bcSel.value !== "custom"; });
 }
 
-// Date spec: either "today", "today±N", or an ISO YYYY-MM-DD string.
-// Renders a mode select + two inputs (text for relative, date for specific)
-// and toggles visibility.
 function setupDateInput(form, which, spec) {
   const modeSel = form.elements[`date-${which}-mode`];
   const relativeInput = form.elements[`date-${which}-relative`];
@@ -676,7 +624,6 @@ function buildWindowRow(w) {
 }
 
 function readForm(form) {
-  // Booking class — shared across all targets in this set.
   const bcSel = form.querySelector("#booking-class");
   const booking_class = bcSel.value === "custom"
     ? parseInt(form.querySelector("#booking-class-custom").value, 10)
@@ -707,7 +654,11 @@ function readForm(form) {
   const dateStart = readDateSpec(form, "start");
   const dateEnd = readDateSpec(form, "end");
 
-  const cfg = {
+  const name = form.elements["name"].value.trim();
+  if (!name) throw new Error("Name is required");
+
+  return {
+    name,
     enabled: form.elements["enabled"].checked,
     targets,
     dates: { start: dateStart, end: dateEnd },
@@ -717,18 +668,14 @@ function readForm(form) {
       windows,
     },
   };
-  return cfg;
 }
 
-// "18" / "9" / "both" → 18 / 9 / [9, 18]. The select stores the raw value.
 function readHoles(form) {
   const v = form.elements["holes"].value;
   if (v === "both") return [9, 18];
   return parseInt(v, 10);
 }
 
-// YAML holes value → matching <select> option. Accepts int (18/9), list
-// (treated as Both if it contains both 9 and 18), or missing.
 function holesToSelectValue(holes) {
   if (Array.isArray(holes)) {
     const set = new Set(holes.map(h => parseInt(h, 10)));
@@ -748,8 +695,8 @@ function readDateSpec(form, which) {
   }
   const v = form.elements[`date-${which}-relative`].value.trim();
   if (!v) throw new Error(`${which === "start" ? "Start" : "End"} date is required`);
-  if (!/^today(\s*[+-]\s*\d+)?$/i.test(v)) {
-    throw new Error(`${which === "start" ? "Start" : "End"} date '${v}' must be "today", "today+N", or "today-N"`);
+  if (!/^today(\s*\+\s*\d+)?$/i.test(v)) {
+    throw new Error(`${which === "start" ? "Start" : "End"} date '${v}' must be "today" or "today+N"`);
   }
   return v;
 }
@@ -757,16 +704,17 @@ function readDateSpec(form, which) {
 // ----- Boot --------------------------------------------------------------
 
 NEW_BTN.addEventListener("click", () => renderEdit(null));
-SIGNOUT_BTN.addEventListener("click", () => {
-  if (!confirm("Sign out? Your access token will be removed from this browser.")) return;
-  localStorage.removeItem(PAT_KEY);
-  TOKEN = null;
-  CACHE.clear();
+SIGNOUT_BTN.addEventListener("click", async () => {
+  if (!confirm("Sign out?")) return;
+  try { await apiLogout(); } catch { /* ignore */ }
   renderAuth();
 });
 
-if (TOKEN) {
-  renderList();
-} else {
-  renderAuth();
-}
+(async () => {
+  try {
+    USER = await apiMe();
+    renderList();
+  } catch (e) {
+    renderAuth();
+  }
+})();
