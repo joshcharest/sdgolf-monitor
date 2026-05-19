@@ -825,7 +825,7 @@ async function renderAdmin() {
   textarea.value = emails.join("\n");
   const err = document.getElementById("admin-error");
 
-  document.getElementById("admin-cancel").addEventListener("click", () => renderList());
+  document.getElementById("admin-back").addEventListener("click", () => renderList());
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -955,6 +955,9 @@ function openBugModal() {
 
 NEW_BTN.addEventListener("click", () => renderEdit(null));
 ADMIN_BTN.addEventListener("click", () => renderAdmin());
+document.getElementById("brand-link").addEventListener("click", () => {
+  if (USER) renderList();
+});
 BUG_FAB.addEventListener("click", () => openBugModal());
 SIGNOUT_BTN.addEventListener("click", async () => {
   if (!confirm("Sign out?")) return;
