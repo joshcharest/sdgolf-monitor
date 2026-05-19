@@ -1,7 +1,11 @@
-"""Entry point: scan every ``configs/*.yaml`` check set in one pass.
+"""Entry point: scan every check set returned by the Worker in one pass.
 
 Logs into ForeUp once, then runs each enabled check set independently. A
 failure in one set is logged and skipped so it can't take down the others.
+
+Configs no longer live on disk — the Cloudflare Worker is the source of
+truth. ``cli()`` fetches them over HTTPS at startup; ``main()`` operates on
+the already-fetched list so tests can pass dicts directly.
 """
 
 from __future__ import annotations
@@ -12,8 +16,9 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-import yaml
+import requests
 
 from .client import ForeUpClient, TeeTime
 from .runner import SmtpCreds, run_check_set
@@ -22,9 +27,9 @@ log = logging.getLogger("sdgolf")
 
 
 def main(
-    config_dir: Path,
     state_dir: Path,
     *,
+    configs: list[dict[str, Any]],
     dry_run: bool = False,
     snapshot_path: Path | None = None,
 ) -> int:
@@ -33,9 +38,8 @@ def main(
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    config_paths = sorted(config_dir.glob("*.yaml"))
-    if not config_paths:
-        log.warning("no check sets found in %s", config_dir)
+    if not configs:
+        log.warning("no check sets returned from worker")
         if snapshot_path:
             _write_snapshot(snapshot_path, {})
         return 0
@@ -48,53 +52,69 @@ def main(
         smtp = SmtpCreds(
             user=_require_env("GMAIL_USERNAME"),
             password=_require_env("GMAIL_APP_PASSWORD"),
-            to_addr=_require_env("NOTIFY_TO"),
         )
 
     client = ForeUpClient()
     client.login(username, password)
     log.info(
         "logged in as %s %s; %d check set(s) to scan",
-        client.user["first_name"], client.user["last_name"], len(config_paths),
+        client.user["first_name"], client.user["last_name"], len(configs),
     )
 
     snapshot: dict[str, dict] = {}
     state_dir.mkdir(parents=True, exist_ok=True)
-    for cfg_path in config_paths:
-        set_name = cfg_path.stem
-        try:
-            cfg = yaml.safe_load(cfg_path.read_text())
-        except Exception as e:
-            log.exception("[%s] failed to parse %s; skipping", set_name, cfg_path)
-            snapshot[set_name] = {"enabled": True, "error": f"parse: {e}", "matches": []}
-            continue
+    for cfg in configs:
+        config_id = cfg.get("id") or cfg.get("name") or "<unnamed>"
+        set_name = cfg.get("name") or config_id
+        common = {
+            "id": config_id,
+            "name": set_name,
+            "owner": cfg.get("owner"),
+            "subscribers": cfg.get("subscribers") or [],
+        }
 
         if cfg.get("enabled", True) is False:
             log.info("[%s] disabled, skipping", set_name)
-            snapshot[set_name] = {"enabled": False, "matches": []}
+            snapshot[config_id] = {**common, "enabled": False, "matches": []}
             continue
 
         try:
             matches = run_check_set(
                 client=client,
                 cfg=cfg,
-                state_path=state_dir / f"{set_name}.json",
+                state_path=state_dir / f"{config_id}.json",
                 set_name=set_name,
                 dry_run=dry_run,
                 smtp=smtp,
             )
-            snapshot[set_name] = {
+            snapshot[config_id] = {
+                **common,
                 "enabled": True,
                 "matches": [_match_dict(m) for m in (matches or [])],
             }
         except Exception as e:
             log.exception("[%s] check set failed; continuing with remaining sets", set_name)
-            snapshot[set_name] = {"enabled": True, "error": str(e), "matches": []}
+            snapshot[config_id] = {
+                **common,
+                "enabled": True,
+                "error": str(e),
+                "matches": [],
+            }
 
     if snapshot_path:
         _write_snapshot(snapshot_path, snapshot)
 
     return 0
+
+
+def fetch_configs(worker_url: str, runner_secret: str) -> list[dict[str, Any]]:
+    resp = requests.get(
+        f"{worker_url.rstrip('/')}/api/internal/configs",
+        headers={"Authorization": f"Bearer {runner_secret}"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _match_dict(tt: TeeTime) -> dict:
@@ -128,13 +148,22 @@ def _require_env(name: str) -> str:
 def cli() -> int:
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument("--config-dir", type=Path, default=Path("configs"))
     p.add_argument("--state-dir", type=Path, default=Path("state"))
     p.add_argument("--dry-run", action="store_true", help="don't email or write state")
     p.add_argument("--snapshot-path", type=Path, default=None,
                    help="write a JSON snapshot of current matches per set to this path")
     args = p.parse_args()
-    return main(args.config_dir, args.state_dir, dry_run=args.dry_run, snapshot_path=args.snapshot_path)
+
+    worker_url = _require_env("WORKER_URL")
+    runner_secret = _require_env("RUNNER_SECRET")
+    configs = fetch_configs(worker_url, runner_secret)
+
+    return main(
+        args.state_dir,
+        configs=configs,
+        dry_run=args.dry_run,
+        snapshot_path=args.snapshot_path,
+    )
 
 
 if __name__ == "__main__":
