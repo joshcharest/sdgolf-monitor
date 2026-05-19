@@ -803,105 +803,167 @@ function readDateSpec(form, which) {
 async function renderAdmin() {
   if (!USER?.is_admin) return renderList();
   CURRENT_VIEW = "admin";
-  ROOT.innerHTML = "<p class='loading'>Loading allowed emails…</p>";
+  ROOT.innerHTML = "<p class='loading'>Loading allowed users…</p>";
   setNav({ showNew: false });
-
-  let emails;
-  try {
-    ({ emails } = await apiAdminGetEmails());
-  } catch (e) {
-    if (e.status === 401) return renderAuth();
-    if (e.status === 403) { toast("Admin access only", "error"); return renderList(); }
-    ROOT.innerHTML = `<p class='error'>Failed to load: ${e.message}</p>`;
-    return;
-  }
 
   ROOT.innerHTML = "";
   const view = document.getElementById("admin-view").content.cloneNode(true);
   ROOT.appendChild(view);
 
-  const form = document.getElementById("admin-form");
-  const textarea = form.elements["emails"];
-  textarea.value = emails.join("\n");
-  const err = document.getElementById("admin-error");
-
   document.getElementById("admin-back").addEventListener("click", () => renderList());
 
-  form.addEventListener("submit", async (e) => {
+  const addForm = document.getElementById("admin-add-form");
+  addForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    err.hidden = true;
-    const submitBtn = form.querySelector("button[type=submit]");
+    const input = addForm.elements["email"];
+    const email = (input.value || "").trim().toLowerCase();
+    if (!email) return;
+    const submitBtn = addForm.querySelector("button[type=submit]");
     submitBtn.disabled = true;
-    submitBtn.textContent = "Saving…";
-    const next = textarea.value
-      .split(/[\n,]/)
-      .map(s => s.trim())
-      .filter(Boolean);
     try {
-      const { emails: saved, removed } = await apiAdminPutEmails(next);
-      textarea.value = saved.join("\n");
-      const parts = [`Saved ${saved.length} email${saved.length === 1 ? "" : "s"}`];
-      if (removed && removed.length > 0) {
-        parts.push(`${removed.length} signed out: ${removed.join(", ")}`);
+      const { allowed } = await loadAdminData();
+      if (allowed.includes(email)) {
+        toast(`${email} is already allowed`);
+        input.value = "";
+        return;
       }
-      toast(parts.join(" — "));
-      await renderAdminUsers();
+      await apiAdminPutEmails([...allowed, email]);
+      input.value = "";
+      toast(`Added ${email}`);
+      await refreshAdminList();
     } catch (e2) {
-      err.textContent = `Save failed: ${e2.message}`;
-      err.hidden = false;
+      toast(`Add failed: ${e2.message}`, "error");
     } finally {
       submitBtn.disabled = false;
-      submitBtn.textContent = "Save";
     }
   });
 
-  await renderAdminUsers();
+  await refreshAdminList();
 }
 
-async function renderAdminUsers() {
+async function loadAdminData() {
+  const [allowedResp, usersResp] = await Promise.all([apiAdminGetEmails(), apiAdminGetUsers()]);
+  return { allowed: allowedResp.emails || [], users: usersResp.emails || [] };
+}
+
+async function refreshAdminList() {
   const list = document.getElementById("admin-users-list");
   const empty = document.getElementById("admin-users-empty");
+  const err = document.getElementById("admin-error");
   if (!list) return;
+  err.hidden = true;
   list.innerHTML = "";
-  let users;
+  let allowed, users;
   try {
-    ({ emails: users } = await apiAdminGetUsers());
+    ({ allowed, users } = await loadAdminData());
   } catch (e) {
-    list.innerHTML = `<li class="error">Failed to load accounts: ${e.message}</li>`;
-    empty.hidden = true;
+    if (e.status === 401) return renderAuth();
+    if (e.status === 403) { toast("Admin access only", "error"); return renderList(); }
+    err.textContent = `Failed to load: ${e.message}`;
+    err.hidden = false;
     return;
   }
-  if (users.length === 0) {
-    empty.hidden = false;
-    return;
-  }
+
+  const union = [...new Set([...allowed, ...users])].sort();
+  if (union.length === 0) { empty.hidden = false; return; }
   empty.hidden = true;
-  for (const email of users) {
+
+  const userSet = new Set(users);
+  const allowedSet = new Set(allowed);
+
+  for (const email of union) {
     const li = document.createElement("li");
     li.className = "admin-user-row";
+
+    const main = document.createElement("div");
+    main.className = "admin-user-main";
+
     const span = document.createElement("span");
     span.className = "admin-user-email";
     span.textContent = email;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "danger";
-    btn.textContent = "Reset password";
-    btn.addEventListener("click", async () => {
-      if (!confirm(`Reset password for ${email}? They'll need to sign up again to set a new one.`)) return;
-      btn.disabled = true;
-      btn.textContent = "Resetting…";
-      try {
-        await apiAdminResetUser(email);
-        toast(`Reset ${email}`);
-        await renderAdminUsers();
-      } catch (e) {
-        btn.disabled = false;
-        btn.textContent = "Reset password";
-        toast(`Failed: ${e.message}`, "error");
-      }
-    });
-    li.appendChild(span);
-    li.appendChild(btn);
+    main.appendChild(span);
+
+    const badges = document.createElement("div");
+    badges.className = "admin-user-badges";
+    if (userSet.has(email)) {
+      const b = document.createElement("span");
+      b.className = "badge badge-account";
+      b.textContent = "account";
+      badges.appendChild(b);
+    } else if (allowedSet.has(email)) {
+      const b = document.createElement("span");
+      b.className = "badge badge-pending";
+      b.textContent = "no account yet";
+      badges.appendChild(b);
+    }
+    if (!allowedSet.has(email)) {
+      const b = document.createElement("span");
+      b.className = "badge badge-orphan";
+      b.textContent = "not on allowlist";
+      badges.appendChild(b);
+    }
+    if (email === USER?.email) {
+      const b = document.createElement("span");
+      b.className = "badge badge-you";
+      b.textContent = "you";
+      badges.appendChild(b);
+    }
+    main.appendChild(badges);
+
+    li.appendChild(main);
+
+    const actions = document.createElement("div");
+    actions.className = "admin-user-actions";
+
+    if (userSet.has(email) && email !== USER?.email) {
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.className = "danger";
+      reset.textContent = "Reset password";
+      reset.addEventListener("click", async () => {
+        if (!confirm(`Reset password for ${email}? They'll need to sign up again to set a new one.`)) return;
+        reset.disabled = true;
+        reset.textContent = "Resetting…";
+        try {
+          await apiAdminResetUser(email);
+          toast(`Reset ${email}`);
+          await refreshAdminList();
+        } catch (e2) {
+          reset.disabled = false;
+          reset.textContent = "Reset password";
+          toast(`Failed: ${e2.message}`, "error");
+        }
+      });
+      actions.appendChild(reset);
+    }
+
+    if (allowedSet.has(email) && email !== USER?.email) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "danger";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", async () => {
+        const had = userSet.has(email);
+        const msg = had
+          ? `Remove ${email} from the allowlist and sign them out? Their existing account will also be deleted.`
+          : `Remove ${email} from the allowlist?`;
+        if (!confirm(msg)) return;
+        remove.disabled = true;
+        remove.textContent = "Removing…";
+        try {
+          await apiAdminPutEmails(allowed.filter(e => e !== email));
+          toast(`Removed ${email}`);
+          await refreshAdminList();
+        } catch (e2) {
+          remove.disabled = false;
+          remove.textContent = "Remove";
+          toast(`Failed: ${e2.message}`, "error");
+        }
+      });
+      actions.appendChild(remove);
+    }
+
+    li.appendChild(actions);
     list.appendChild(li);
   }
 }
