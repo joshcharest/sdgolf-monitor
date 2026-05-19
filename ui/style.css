@@ -378,6 +378,60 @@ main {
   letter-spacing: 0.06em;
   color: var(--text-muted);
 }
+/* Grouped match: collapsed header + expandable time list. */
+.card-matches-list li.match-group { padding: 0; }
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  text-align: left;
+  font: inherit;
+  font-family: var(--font-mono);
+  color: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.group-header:hover {
+  background: rgba(201, 169, 106, 0.06);
+  border-color: transparent;
+}
+.group-header:hover .match-when  { color: var(--link); }
+.group-header:hover .match-where { color: var(--accent); }
+.group-head-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.group-chevron {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  transition: transform 0.18s, color 0.15s;
+}
+.match-group.open .group-chevron {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+.group-times {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0 0 4px 14px;
+  border-left: 1px dashed var(--border);
+  margin-left: 8px;
+}
+.group-times li { border-bottom: none; }
+.group-times .match-link { padding: 6px 4px; }
+.group-times .match-primary { font-size: 12.5px; }
+
 .card-matches-list li.more {
   text-align: center;
   border-bottom: none;

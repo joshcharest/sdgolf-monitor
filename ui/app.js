@@ -319,27 +319,124 @@ function renderCardMatches(article, entry) {
   summary.textContent = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
   summary.classList.add("hit");
 
-  // Sort by date then time. Show the first MAX; the rest are revealed on
-  // demand via a "Show N more" button so cards stay compact by default.
-  const sorted = matches.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  // Group by (course, date). A day with one time renders as a single row;
+  // days with multiple times collapse into an expandable header so a long
+  // run of Saturday slots at one course doesn't dominate the card.
+  const groups = groupMatches(matches);
   const MAX = 8;
-  for (const m of sorted.slice(0, MAX)) list.appendChild(buildMatchLi(m));
-  if (sorted.length > MAX) {
+  for (const g of groups.slice(0, MAX)) list.appendChild(buildGroupLi(g));
+  if (groups.length > MAX) {
     const moreLi = document.createElement("li");
     moreLi.className = "more";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "show-more";
-    const remaining = sorted.length - MAX;
+    const remaining = groups.length - MAX;
     btn.textContent = `Show ${remaining} more`;
     btn.addEventListener("click", () => {
       moreLi.remove();
-      for (const m of sorted.slice(MAX)) list.appendChild(buildMatchLi(m));
+      for (const g of groups.slice(MAX)) list.appendChild(buildGroupLi(g));
     });
     moreLi.appendChild(btn);
     list.appendChild(moreLi);
   }
   wrapper.hidden = false;
+}
+
+function groupMatches(matches) {
+  const map = new Map();
+  for (const m of matches) {
+    const key = `${m.date}\t${m.target}`;
+    let g = map.get(key);
+    if (!g) { g = { date: m.date, target: m.target, times: [] }; map.set(key, g); }
+    g.times.push(m);
+  }
+  for (const g of map.values()) g.times.sort((a, b) => a.time.localeCompare(b.time));
+  return [...map.values()].sort((a, b) =>
+    (a.date + a.target).localeCompare(b.date + b.target)
+  );
+}
+
+function buildGroupLi(g) {
+  // Single-time groups skip the expand affordance — there's nothing to hide.
+  if (g.times.length === 1) return buildMatchLi(g.times[0]);
+
+  const li = document.createElement("li");
+  li.className = "match-group";
+
+  const header = document.createElement("button");
+  header.type = "button";
+  header.className = "group-header";
+  header.setAttribute("aria-expanded", "false");
+
+  const primary = document.createElement("div");
+  primary.className = "match-primary";
+  primary.append(
+    mkSpan("match-when", formatDate(g.date)),
+    document.createTextNode(" "),
+    mkSpan("match-where", g.target),
+  );
+
+  const meta = document.createElement("div");
+  meta.className = "match-meta";
+  const earliest = fmt12h(g.times[0].time);
+  const latest = fmt12h(g.times[g.times.length - 1].time);
+  meta.textContent = `${g.times.length} times · ${earliest}–${latest}`;
+
+  const headBody = document.createElement("div");
+  headBody.className = "group-head-body";
+  headBody.append(primary, meta);
+
+  const chevron = mkSpan("group-chevron", "▾");
+  header.append(headBody, chevron);
+
+  const inner = document.createElement("ul");
+  inner.className = "group-times";
+  inner.hidden = true;
+  for (const m of g.times) inner.appendChild(buildTimeLi(m));
+
+  header.addEventListener("click", () => {
+    const open = inner.hidden;
+    inner.hidden = !open;
+    header.setAttribute("aria-expanded", open ? "true" : "false");
+    li.classList.toggle("open", open);
+  });
+
+  li.append(header, inner);
+  return li;
+}
+
+function buildTimeLi(m) {
+  // A row inside an expanded group — same layout as buildMatchLi but the
+  // primary line is just the time (course + date already in the header).
+  const li = document.createElement("li");
+
+  const link = document.createElement("a");
+  link.className = "match-link group-time-link";
+  link.href = bookingUrl(m);
+  link.target = "_blank";
+  link.rel = "noopener";
+
+  const primary = document.createElement("div");
+  primary.className = "match-primary";
+  primary.append(mkSpan("match-when", fmt12h(m.time)));
+
+  const rate = residentRate(m.target, m.green_fee);
+  const fee = rate == null ? null : `$${rate % 1 === 0 ? rate : rate.toFixed(2)}`;
+  let bf = null;
+  if (hasAdvancedBookingFee(m)) {
+    const amount = ADVANCED_BOOKING_FEE[m.target];
+    bf = amount != null ? `+ $${amount} Advanced Booking Fee` : "+ Advanced Booking Fee";
+  }
+  const money = [fee, bf].filter(Boolean).join(" ");
+  const metaParts = [`${m.available_spots}p`, `${m.holes}`, money].filter(Boolean);
+  const meta = document.createElement("div");
+  meta.className = "match-meta";
+  meta.textContent = metaParts.join(" · ");
+
+  link.append(primary, meta);
+  li.append(link);
+  return li;
 }
 
 function buildMatchLi(m) {
