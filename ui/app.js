@@ -365,9 +365,13 @@ function buildMatchLi(m) {
   const rate = residentRate(m.target, m.green_fee);
   const fee = rate == null ? null : `$${rate % 1 === 0 ? rate : rate.toFixed(2)}`;
   // Advanced booking fee shown as a separate line item since it's
-  // non-refundable — don't roll it into the green-fee total.
+  // non-refundable — don't roll it into the green-fee total. We infer
+  // applicability from the date (8+ days out → resident 8-90 day class
+  // → fee applies) rather than trusting m.booking_fee, because ForeUp
+  // returns booking_fee_required=false for Torrey slots queried via
+  // booking class 929 even when they're 30+ days out.
   let bf = null;
-  if (m.booking_fee) {
+  if (hasAdvancedBookingFee(m)) {
     const amount = ADVANCED_BOOKING_FEE[m.target];
     bf = amount != null ? `+ $${amount} Advanced Booking Fee` : "+ Advanced Booking Fee";
   }
@@ -461,6 +465,20 @@ const ADVANCED_BOOKING_FEE = {
   "Torrey Pines South": 32,
   "Torrey Pines North": 32,
 };
+
+// True when the slot falls in the SD resident 8-90 day booking window, where
+// the advanced fee applies regardless of which booking class was queried.
+function hasAdvancedBookingFee(m) {
+  if (typeof m.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(m.date)) {
+    return Boolean(m.booking_fee);  // fallback to API flag if date is funky
+  }
+  const [y, mo, d] = m.date.split("-").map(Number);
+  const slot = Date.UTC(y, mo - 1, d);
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const days = Math.round((slot - todayUtc) / 86400000);
+  return days >= 8;
+}
 
 // "08:00" -> "8 AM"; "16:30" -> "4:30 PM"; "12:00" -> "12 PM".
 // Round-hour times drop the ":00" for compactness.
