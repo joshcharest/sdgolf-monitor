@@ -14,7 +14,7 @@
 </head>
 <body>
   <header>
-    <div class="brand">
+    <button type="button" id="brand-link" class="brand">
       <svg class="brand-mark" viewBox="0 0 24 32" width="22" height="30" aria-hidden="true">
         <path d="M6 30 V3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none" />
         <path d="M6 3.5 L21 7.5 L6 12 Z" fill="currentColor" />
@@ -24,7 +24,7 @@
         <h1>sdgolf <em>·</em> tee time monitor</h1>
         <p class="brand-sub">San Diego city courses · live availability</p>
       </div>
-    </div>
+    </button>
     <nav>
       <button id="new-btn" type="button" hidden>New subscription</button>
       <button id="admin-btn" type="button" hidden>Admin</button>
@@ -196,6 +196,8 @@
 
   <template id="admin-view">
     <section class="card edit">
+      <button type="button" id="admin-back" class="back-link">← Back to subscriptions</button>
+
       <h2>Allowed sign-up emails</h2>
       <p class="hint">One email per line. Only people on this list can create accounts. Existing accounts aren't affected if you remove an email — they stay signed in until they log out.</p>
       <form id="admin-form">
@@ -205,7 +207,6 @@
         </label>
         <footer class="edit-footer">
           <button type="submit" class="primary">Save</button>
-          <button type="button" id="admin-cancel">Cancel</button>
         </footer>
       </form>
       <p class="error" id="admin-error" hidden></p>
