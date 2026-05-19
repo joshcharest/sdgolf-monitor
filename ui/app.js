@@ -323,43 +323,74 @@ function renderCardMatches(article, entry) {
   summary.textContent = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
   summary.classList.add("hit");
 
-  const sorted = matches.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  const MAX = 8;
-  for (const m of sorted.slice(0, MAX)) list.appendChild(buildMatchLi(m));
-  if (sorted.length > MAX) {
-    const moreLi = document.createElement("li");
-    moreLi.className = "more";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "show-more";
-    const remaining = sorted.length - MAX;
-    btn.textContent = `Show ${remaining} more`;
-    btn.addEventListener("click", () => {
-      moreLi.remove();
-      for (const m of sorted.slice(MAX)) list.appendChild(buildMatchLi(m));
-    });
-    moreLi.appendChild(btn);
-    list.appendChild(moreLi);
+  // Group by course, then by date. Each day starts collapsed; clicking the
+  // day row expands the times inline.
+  const grouped = new Map();
+  for (const m of matches) {
+    if (!grouped.has(m.target)) grouped.set(m.target, new Map());
+    const byDate = grouped.get(m.target);
+    if (!byDate.has(m.date)) byDate.set(m.date, []);
+    byDate.get(m.date).push(m);
+  }
+  for (const byDate of grouped.values()) {
+    for (const arr of byDate.values()) arr.sort((a, b) => a.time.localeCompare(b.time));
+  }
+
+  const sortedCourses = [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [course, byDate] of sortedCourses) {
+    const header = document.createElement("li");
+    header.className = "match-course-header";
+    header.textContent = course;
+    list.appendChild(header);
+
+    const sortedDates = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [date, dateMatches] of sortedDates) {
+      list.appendChild(buildDayRow(date, dateMatches));
+    }
   }
   wrapper.hidden = false;
 }
 
-function buildMatchLi(m) {
+function buildDayRow(date, dayMatches) {
+  const li = document.createElement("li");
+  li.className = "match-day-row";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "match-day-toggle";
+  toggle.append(
+    mkSpan("match-day-label", `${formatDate(date)} · ${dayMatches.length} time${dayMatches.length === 1 ? "" : "s"}`),
+    mkSpan("match-day-chevron", "▶"),
+  );
+
+  const times = document.createElement("ul");
+  times.className = "match-times-list";
+  times.hidden = true;
+  for (const m of dayMatches) times.appendChild(buildTimeLi(m));
+
+  toggle.addEventListener("click", () => {
+    const expanded = !times.hidden;
+    times.hidden = expanded;
+    toggle.classList.toggle("expanded", !expanded);
+    toggle.querySelector(".match-day-chevron").textContent = expanded ? "▶" : "▼";
+  });
+
+  li.append(toggle, times);
+  return li;
+}
+
+function buildTimeLi(m) {
   const li = document.createElement("li");
 
   const link = document.createElement("a");
-  link.className = "match-link";
+  link.className = "match-link match-time";
   link.href = bookingUrl(m);
   link.target = "_blank";
   link.rel = "noopener";
 
   const primary = document.createElement("div");
-  primary.className = "match-primary";
-  primary.append(
-    mkSpan("match-when", `${formatDate(m.date)} · ${fmt12h(m.time)}`),
-    document.createTextNode(" "),
-    mkSpan("match-where", m.target),
-  );
+  primary.className = "match-time-primary";
+  primary.append(mkSpan("match-when", fmt12h(m.time)));
 
   const rate = residentRate(m.target, m.green_fee);
   const fee = rate == null ? null : `$${rate % 1 === 0 ? rate : rate.toFixed(2)}`;
