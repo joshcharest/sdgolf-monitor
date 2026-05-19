@@ -27,6 +27,7 @@
     </div>
     <nav>
       <button id="new-btn" type="button" hidden>New subscription</button>
+      <button id="admin-btn" type="button" hidden>Admin</button>
       <span id="user-badge" class="user-badge" hidden></span>
       <button id="signout-btn" type="button" hidden>Sign out</button>
     </nav>
@@ -190,6 +191,24 @@
         </footer>
       </form>
       <p class="error" id="edit-error" hidden></p>
+    </section>
+  </template>
+
+  <template id="admin-view">
+    <section class="card edit">
+      <h2>Allowed sign-up emails</h2>
+      <p class="hint">One email per line. Only people on this list can create accounts. Existing accounts aren't affected if you remove an email — they stay signed in until they log out.</p>
+      <form id="admin-form">
+        <label>
+          Emails
+          <textarea name="emails" rows="10" placeholder="alice@example.com&#10;bob@example.com" autocomplete="off"></textarea>
+        </label>
+        <footer class="edit-footer">
+          <button type="submit" class="primary">Save</button>
+          <button type="button" id="admin-cancel">Cancel</button>
+        </footer>
+      </form>
+      <p class="error" id="admin-error" hidden></p>
     </section>
   </template>
 

@@ -33,6 +33,9 @@ export default {
 
     if (pathname === "/api/internal/configs" && method === "GET") return handleInternalConfigs(request, env);
 
+    if (pathname === "/api/admin/emails" && method === "GET") return handleAdminListEmails(request, env);
+    if (pathname === "/api/admin/emails" && method === "PUT") return handleAdminPutEmails(request, env);
+
     if (pathname === "/api/configs" && method === "GET")  return handleListConfigs(request, env);
     if (pathname === "/api/configs" && method === "POST") return handleCreateConfig(request, env);
 
@@ -105,7 +108,7 @@ async function handleSignup(request, env) {
   const password = typeof body?.password === "string" ? body.password : "";
   if (!email || !password) return json({ error: "email and password required" }, 400);
   if (password.length < 8) return json({ error: "password must be at least 8 characters" }, 400);
-  if (!emailIsAllowed(email, env)) {
+  if (!await emailIsAllowed(email, env)) {
     return json({ error: "this email is not on the allow list — ask the admin to add it" }, 403);
   }
   if (await env.SNAPSHOT_KV.get(`user:${email}`)) {
@@ -119,13 +122,70 @@ async function handleSignup(request, env) {
   return sessionResponse(email, env, 201);
 }
 
-function emailIsAllowed(email, env) {
-  if (!env.ALLOWED_EMAILS) return false;
-  const allowed = env.ALLOWED_EMAILS
+async function emailIsAllowed(email, env) {
+  const list = await readAllowedEmails(env);
+  return list.includes(email);
+}
+
+// KV is the source of truth once the admin has saved a list. The
+// ALLOWED_EMAILS secret is used only as the initial bootstrap value
+// for the very first signup before any admin write has happened.
+async function readAllowedEmails(env) {
+  if (env.SNAPSHOT_KV) {
+    const kvJson = await env.SNAPSHOT_KV.get("allowed_emails");
+    if (kvJson) {
+      try {
+        const list = JSON.parse(kvJson);
+        if (Array.isArray(list)) {
+          return list.map(e => String(e).trim().toLowerCase()).filter(Boolean);
+        }
+      } catch { /* fall through */ }
+    }
+  }
+  return (env.ALLOWED_EMAILS || "")
     .split(",")
     .map(e => e.trim().toLowerCase())
     .filter(Boolean);
-  return allowed.includes(email);
+}
+
+function adminEmails(env) {
+  // Comma-separated email list for admin privileges. Hardcoded default lets
+  // the maintainer manage things without yet another Worker secret.
+  const raw = env.ADMIN_EMAILS || "sdgolfmonitor@gmail.com";
+  return raw.split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+}
+
+function isAdminSession(session, env) {
+  return Boolean(session) && adminEmails(env).includes(session.email);
+}
+
+async function requireAdmin(request, env) {
+  const session = await getSession(request, env);
+  if (!session) return json({ error: "not signed in" }, 401);
+  if (!isAdminSession(session, env)) return json({ error: "forbidden" }, 403);
+  return session;
+}
+
+async function handleAdminListEmails(request, env) {
+  const session = await requireAdmin(request, env);
+  if (session instanceof Response) return session;
+  return json({ emails: await readAllowedEmails(env) });
+}
+
+async function handleAdminPutEmails(request, env) {
+  const session = await requireAdmin(request, env);
+  if (session instanceof Response) return session;
+  const body = await safeJson(request);
+  if (!body || !Array.isArray(body.emails)) {
+    return json({ error: "expected { emails: [string, ...] }" }, 400);
+  }
+  const cleaned = body.emails
+    .map(e => String(e).trim().toLowerCase())
+    .filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+  // Always include the admins so an accidental save can't lock the admin out.
+  const final = [...new Set([...adminEmails(env), ...cleaned])].sort();
+  await env.SNAPSHOT_KV.put("allowed_emails", JSON.stringify(final));
+  return json({ emails: final });
 }
 
 async function handleLogin(request, env) {
@@ -153,7 +213,7 @@ function handleLogout() {
 async function handleMe(request, env) {
   const session = await getSession(request, env);
   if (!session) return json({ error: "not signed in" }, 401);
-  return json({ email: session.email });
+  return json({ email: session.email, is_admin: isAdminSession(session, env) });
 }
 
 function authSecretsReady(env) {
@@ -170,7 +230,8 @@ async function getSession(request, env) {
 async function sessionResponse(email, env, status) {
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SEC;
   const token = await signSession({ email, exp }, env.SESSION_SECRET);
-  return new Response(JSON.stringify({ email }), {
+  const is_admin = adminEmails(env).includes(email);
+  return new Response(JSON.stringify({ email, is_admin }), {
     status,
     headers: {
       "Content-Type": "application/json",
