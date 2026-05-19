@@ -32,6 +32,7 @@ def run_check_set(
     set_name: str,
     dry_run: bool,
     smtp: SmtpCreds | None,
+    recipients_override: list[str] | None = None,
 ) -> list[TeeTime]:
     """Run one config to completion. Caller handles exception isolation.
 
@@ -101,9 +102,9 @@ def run_check_set(
 
     if smtp is None:
         raise RuntimeError("smtp creds required for non-dry-run with new matches")
-    recipients = _recipients(cfg)
+    recipients = recipients_override if recipients_override is not None else recipients_for(cfg)
     if not recipients:
-        log.warning("[%s] no recipients (no owner/subscribers); skipping email", set_name)
+        log.info("[%s] no recipients for this run (e.g. all pending-confirmation); skipping standard email", set_name)
     else:
         notify.send_email(
             smtp_user=smtp.user,
@@ -116,7 +117,7 @@ def run_check_set(
     return matches
 
 
-def _recipients(cfg: dict[str, Any]) -> list[str]:
+def recipients_for(cfg: dict[str, Any]) -> list[str]:
     """Owner + de-duped subscribers, dropping blanks. Order: owner first."""
     seen: set[str] = set()
     out: list[str] = []

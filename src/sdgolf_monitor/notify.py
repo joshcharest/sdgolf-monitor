@@ -104,6 +104,122 @@ def _fmt_date(spec: str) -> str:
         return spec
 
 
+def send_confirmation_email(
+    *,
+    smtp_user: str,
+    smtp_password: str,
+    to_addr: str,
+    action: str,                      # "create" or "subscribe"
+    cfg: dict,
+    current_matches: list[dict] | None = None,
+) -> None:
+    """Send a one-shot informational email when someone creates / subscribes.
+
+    Lists the check-set parameters so the recipient sees what's been set up,
+    plus a snapshot of currently-matching tee times (which they'd otherwise
+    miss since the cron's dedup state already considers them 'seen').
+
+    No opt-in or click-to-confirm — purely informational.
+    """
+    set_name = cfg.get("name", "(unnamed)")
+    verb = "created" if action == "create" else "subscribed to"
+    msg = EmailMessage()
+    msg["From"] = smtp_user
+    msg["To"] = to_addr
+    msg["Subject"] = f"[sdgolf:{set_name}] You {verb} {set_name}"
+    msg.set_content(_confirmation_plaintext(verb, cfg, current_matches or []))
+    msg.add_alternative(_confirmation_html(verb, cfg, current_matches or []), subtype="html")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
+        smtp.login(smtp_user, smtp_password)
+        smtp.send_message(msg)
+
+
+def _params_lines(cfg: dict) -> list[tuple[str, str]]:
+    """Return [(label, value), ...] for the check-set parameter summary."""
+    targets = ", ".join(t.get("name", "?") for t in cfg.get("targets", []))
+    dates = cfg.get("dates") or {}
+    date_range = f"{dates.get('start', '?')} → {dates.get('end', '?')}"
+    f = cfg.get("filter") or {}
+    holes = f.get("holes", "?")
+    holes_str = " + ".join(str(h) for h in holes) if isinstance(holes, list) else str(holes)
+    min_p = f.get("min_players", 1)
+    windows = ", ".join(f"{_fmt_12h(w.get('start', '?'))}–{_fmt_12h(w.get('end', '?'))}" for w in (f.get("windows") or [])) or "any time"
+    return [
+        ("Courses", targets or "(none)"),
+        ("Dates", date_range),
+        ("Holes", holes_str),
+        ("Min players", str(min_p)),
+        ("Windows", windows),
+        ("Owner", cfg.get("owner", "?")),
+    ]
+
+
+def _confirmation_plaintext(verb: str, cfg: dict, matches: list[dict]) -> str:
+    name = cfg.get("name", "(unnamed)")
+    lines = [f"You {verb} {name}.", ""]
+    lines.append("Parameters:")
+    for label, value in _params_lines(cfg):
+        lines.append(f"  {label}: {value}")
+    lines.append("")
+    if matches:
+        plural = "match" if len(matches) == 1 else "matches"
+        lines.append(f"Currently available ({len(matches)} {plural}):")
+        for m in sorted(matches, key=lambda x: (x.get("date", ""), x.get("time", ""), x.get("target", ""))):
+            line = (
+                f"  {_fmt_date(m.get('date', '?'))}  {_fmt_12h(m.get('time', '?'))}  "
+                f"{m.get('target', '?')}  {m.get('available_spots', '?')} spots  "
+                f"{m.get('holes', '?')}  "
+                f"{_fee_text(m.get('target', ''), m.get('green_fee'), m.get('date', ''))}"
+            )
+            lines.append(line)
+            url = _booking_url(m.get("target", ""), m.get("date", ""))
+            if url:
+                lines.append(f"    {url}")
+    else:
+        lines.append("No tee times currently match this filter — you'll get an email as soon as one appears.")
+    lines.append("")
+    lines.append("You'll be emailed when new tee times appear that match these parameters.")
+    return "\n".join(lines)
+
+
+def _confirmation_html(verb: str, cfg: dict, matches: list[dict]) -> str:
+    name = cfg.get("name", "(unnamed)")
+    rows = []
+    for label, value in _params_lines(cfg):
+        rows.append(
+            f"<tr><th style='text-align:left;padding:4px 12px 4px 0;color:#888'>{html_escape(label)}</th>"
+            f"<td style='padding:4px 0'>{html_escape(value)}</td></tr>"
+        )
+    params_table = (
+        "<table style='border-collapse:collapse;font-family:sans-serif;font-size:14px'>"
+        + "".join(rows)
+        + "</table>"
+    )
+    body = [
+        f"<p>You {verb} <strong>{html_escape(name)}</strong>.</p>",
+        "<h3 style='font-family:sans-serif;font-size:14px;margin-bottom:6px'>Parameters</h3>",
+        params_table,
+    ]
+    if matches:
+        plural = "match" if len(matches) == 1 else "matches"
+        body.append(
+            f"<h3 style='font-family:sans-serif;font-size:14px;margin-top:18px;margin-bottom:6px'>"
+            f"Currently available ({len(matches)} {plural})</h3>"
+        )
+        body.append(_html(_match_dicts_as_objs(matches)))
+    else:
+        body.append("<p style='color:#666'>No tee times currently match this filter — you'll get an email as soon as one appears.</p>")
+    body.append("<p style='color:#888;font-size:12px'>You'll be emailed when new tee times appear that match these parameters.</p>")
+    return "<div style='font-family:sans-serif'>" + "".join(body) + "</div>"
+
+
+def _match_dicts_as_objs(matches: list[dict]) -> list:
+    """Wrap match dicts so _html() can read attribute-style."""
+    class _M:
+        def __init__(self, m): self.__dict__.update(m)
+    return [_M(m) for m in matches]
+
+
 def _fmt_12h(t: str) -> str:
     try:
         h_s, m_s = t.split(":")
