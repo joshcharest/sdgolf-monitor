@@ -2,12 +2,44 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import smtplib
+import time
 from datetime import date, datetime
 from email.message import EmailMessage
 from html import escape as html_escape
 
 from .client import TeeTime
+
+# 90 days is long enough that anyone who saved an old email can still click
+# through, but short enough that a leaked URL eventually stops working.
+_UNSUB_TTL_SEC = 90 * 24 * 60 * 60
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _unsubscribe_token(email: str, config_id: str, secret: str) -> str:
+    """HMAC-signed `body.sig` token; verified by the worker's verifyUnsubscribeToken.
+
+    Payload mirrors what the worker expects: {email, config_id, exp}. Both sides
+    base64url-encode without padding and HMAC-SHA256 the encoded body.
+    """
+    payload = {"email": email, "config_id": config_id, "exp": int(time.time()) + _UNSUB_TTL_SEC}
+    body = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sig = _b64url(hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest())
+    return f"{body}.{sig}"
+
+
+def _unsubscribe_url(worker_url: str | None, secret: str | None, email: str, config_id: str) -> str | None:
+    if not worker_url or not secret or not email or not config_id:
+        return None
+    token = _unsubscribe_token(email, config_id, secret)
+    return f"{worker_url.rstrip('/')}/api/unsubscribe?t={token}"
 
 
 # Course name -> ForeUp teesheet (schedule) id. Used to construct booking
@@ -194,6 +226,8 @@ def send_confirmation_email(
     action: str,                      # "create" or "subscribe"
     cfg: dict,
     current_matches: list[dict] | None = None,
+    worker_url: str | None = None,
+    unsubscribe_secret: str | None = None,
 ) -> None:
     """Send a one-shot informational email when someone creates / subscribes.
 
@@ -201,16 +235,25 @@ def send_confirmation_email(
     plus a snapshot of currently-matching tee times (which they'd otherwise
     miss since the cron's dedup state already considers them 'seen').
 
+    For action="subscribe" we include a personalised unsubscribe link, so the
+    recipient can back out immediately without logging in. Owners (action=
+    "create") don't get one — they can delete the check set from the UI.
+
     No opt-in or click-to-confirm — purely informational.
     """
     set_name = cfg.get("name", "(unnamed)")
     verb = "created" if action == "create" else "subscribed to"
+    unsub = (
+        _unsubscribe_url(worker_url, unsubscribe_secret, to_addr, cfg.get("id", ""))
+        if action == "subscribe" else None
+    )
     msg = EmailMessage()
     msg["From"] = smtp_user
     msg["To"] = to_addr
     msg["Subject"] = f"[sdgolf:{set_name}] You {verb} {set_name}"
-    msg.set_content(_confirmation_plaintext(verb, cfg, current_matches or []))
-    msg.add_alternative(_confirmation_html(verb, cfg, current_matches or []), subtype="html")
+    _set_list_unsubscribe(msg, unsub)
+    msg.set_content(_confirmation_plaintext(verb, cfg, current_matches or [], unsubscribe_url=unsub))
+    msg.add_alternative(_confirmation_html(verb, cfg, current_matches or [], unsubscribe_url=unsub), subtype="html")
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
         smtp.login(smtp_user, smtp_password)
         smtp.send_message(msg)
@@ -236,7 +279,7 @@ def _params_lines(cfg: dict) -> list[tuple[str, str]]:
     ]
 
 
-def _confirmation_plaintext(verb: str, cfg: dict, matches: list[dict]) -> str:
+def _confirmation_plaintext(verb: str, cfg: dict, matches: list[dict], *, unsubscribe_url: str | None = None) -> str:
     name = cfg.get("name", "(unnamed)")
     lines = [f"You {verb} {name}.", ""]
     lines.append("Parameters:")
@@ -261,10 +304,13 @@ def _confirmation_plaintext(verb: str, cfg: dict, matches: list[dict]) -> str:
         lines.append("No tee times currently match this filter — you'll get an email as soon as one appears.")
     lines.append("")
     lines.append("You'll be emailed when new tee times appear that match these parameters.")
+    if unsubscribe_url:
+        lines.append("")
+        lines.append(f"Unsubscribe: {unsubscribe_url}")
     return "\n".join(lines)
 
 
-def _confirmation_html(verb: str, cfg: dict, matches: list[dict]) -> str:
+def _confirmation_html(verb: str, cfg: dict, matches: list[dict], *, unsubscribe_url: str | None = None) -> str:
     name = cfg.get("name", "(unnamed)")
     rows = []
     for label, value in _params_lines(cfg):
@@ -292,6 +338,13 @@ def _confirmation_html(verb: str, cfg: dict, matches: list[dict]) -> str:
     else:
         body.append("<p style='color:#666'>No tee times currently match this filter — you'll get an email as soon as one appears.</p>")
     body.append("<p style='color:#888;font-size:12px'>You'll be emailed when new tee times appear that match these parameters.</p>")
+    if unsubscribe_url:
+        body.append(
+            "<p style='color:#888;font-size:12px'>"
+            f"<a href='{html_escape(unsubscribe_url, quote=True)}'>Unsubscribe</a> from "
+            f"<strong>{html_escape(name)}</strong>."
+            "</p>"
+        )
     return "<div style='font-family:sans-serif'>" + "".join(body) + "</div>"
 
 
@@ -320,28 +373,48 @@ def send_email(
     to_addrs: list[str],
     set_name: str,
     new_times: list[TeeTime],
+    owner: str | None = None,
+    config_id: str | None = None,
+    worker_url: str | None = None,
+    unsubscribe_secret: str | None = None,
 ) -> None:
-    """Send a digest email for one check set's new matches.
+    """Send a digest email for one check set's new matches, one message per recipient.
 
-    The ``set_name`` is tagged into the subject so Gmail filters can route each
-    check set's notifications independently. ``to_addrs`` is a list because each
-    check set has an owner plus optional subscribers; they all get the same
-    digest in one send.
+    Each subscriber gets a personalised unsubscribe link bound to their email +
+    this config; the owner gets the same digest with no unsub link (they own
+    the set and can delete it from the UI). Sent as separate messages so each
+    recipient only sees their own address and gets their own link.
 
     Raises smtplib.SMTPException on transport failure.
     """
     if not new_times or not to_addrs:
         return
-    msg = EmailMessage()
-    msg["From"] = smtp_user
-    msg["To"] = ", ".join(to_addrs)
-    msg["Subject"] = _subject(set_name, new_times)
-    msg.set_content(_plaintext(new_times))
-    msg.add_alternative(_html(new_times), subtype="html")
-
+    owner_norm = (owner or "").strip().lower()
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
         smtp.login(smtp_user, smtp_password)
-        smtp.send_message(msg, to_addrs=to_addrs)
+        for addr in to_addrs:
+            is_owner = addr.strip().lower() == owner_norm
+            unsub = None if is_owner else _unsubscribe_url(worker_url, unsubscribe_secret, addr, config_id or "")
+            msg = EmailMessage()
+            msg["From"] = smtp_user
+            msg["To"] = addr
+            msg["Subject"] = _subject(set_name, new_times)
+            _set_list_unsubscribe(msg, unsub)
+            msg.set_content(_plaintext(new_times, set_name=set_name, unsubscribe_url=unsub))
+            msg.add_alternative(_html(new_times, set_name=set_name, unsubscribe_url=unsub), subtype="html")
+            smtp.send_message(msg, to_addrs=[addr])
+
+
+def _set_list_unsubscribe(msg: EmailMessage, unsubscribe_url: str | None) -> None:
+    """Add RFC 2369 + RFC 8058 unsubscribe headers so Gmail / Apple Mail show
+    a native Unsubscribe button. List-Unsubscribe-Post tells the client the
+    URL accepts a one-click POST — without it, clients fall back to opening
+    the link as a GET (which our worker handles by showing a confirm page).
+    """
+    if not unsubscribe_url:
+        return
+    msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+    msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
 
 def _subject(set_name: str, new_times: list[TeeTime]) -> str:
@@ -349,7 +422,12 @@ def _subject(set_name: str, new_times: list[TeeTime]) -> str:
     return f"[sdgolf:{set_name}] {len(new_times)} tee time(s) — {', '.join(targets)}"
 
 
-def _plaintext(new_times: list[TeeTime]) -> str:
+def _plaintext(
+    new_times: list[TeeTime],
+    *,
+    set_name: str | None = None,
+    unsubscribe_url: str | None = None,
+) -> str:
     lines = ["New tee times matching your filter:\n"]
     for tt in sorted(new_times, key=lambda t: (t.date, t.time, t.target)):
         lines.append(
@@ -361,10 +439,18 @@ def _plaintext(new_times: list[TeeTime]) -> str:
         if url:
             lines.append(f"    {url}")
     lines.append(f"\nfetched {datetime.now().isoformat(timespec='seconds')}")
+    if unsubscribe_url:
+        label = f' "{set_name}"' if set_name else ""
+        lines.append(f"\nUnsubscribe from{label}: {unsubscribe_url}")
     return "\n".join(lines)
 
 
-def _html(new_times: list[TeeTime]) -> str:
+def _html(
+    new_times: list[TeeTime],
+    *,
+    set_name: str | None = None,
+    unsubscribe_url: str | None = None,
+) -> str:
     rows = []
     for tt in sorted(new_times, key=lambda t: (t.date, t.time, t.target)):
         fee_text = _fee_text(tt.target, tt.green_fee, tt.date)
@@ -380,7 +466,7 @@ def _html(new_times: list[TeeTime]) -> str:
             f"<td>{tt.available_spots}</td><td>{tt.holes}</td>"
             f"<td>{html_escape(fee_text)}</td></tr>"
         )
-    return (
+    table = (
         "<table style='border-collapse:collapse' cellpadding='6'>"
         "<thead><tr style='background:#f0f0f0'>"
         "<th>Date</th><th>Time</th><th>Course</th><th>Spots</th><th>Holes</th><th>Fee</th>"
@@ -388,3 +474,12 @@ def _html(new_times: list[TeeTime]) -> str:
         + "".join(rows)
         + "</tbody></table>"
     )
+    if not unsubscribe_url:
+        return table
+    label = f' "{html_escape(set_name)}"' if set_name else ""
+    footer = (
+        "<p style='margin-top:18px;color:#888;font-size:12px;font-family:sans-serif'>"
+        f"<a href='{html_escape(unsubscribe_url, quote=True)}'>Unsubscribe</a> from{label}."
+        "</p>"
+    )
+    return table + footer

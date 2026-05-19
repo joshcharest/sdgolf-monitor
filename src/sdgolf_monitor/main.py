@@ -38,6 +38,8 @@ def main(
     bugs: list[dict[str, Any]] | None = None,
     bug_consume: "callable[[str], None] | None" = None,
     admin_emails: list[str] | None = None,
+    worker_url: str | None = None,
+    unsubscribe_secret: str | None = None,
 ) -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -106,6 +108,8 @@ def main(
                 dry_run=dry_run,
                 smtp=smtp,
                 recipients_override=recipients_override,
+                worker_url=worker_url,
+                unsubscribe_secret=unsubscribe_secret,
             )
             snapshot[config_id] = {
                 **common,
@@ -141,6 +145,8 @@ def main(
                     action=p.get("action", "subscribe"),
                     cfg=cfg,
                     current_matches=matches_for_email,
+                    worker_url=worker_url,
+                    unsubscribe_secret=unsubscribe_secret,
                 )
                 log.info("[%s] sent %s confirmation to %s", cfg.get("name"), p.get("action"), p["email"])
             except Exception:
@@ -290,6 +296,8 @@ def cli() -> int:
         bugs=bugs,
         bug_consume=lambda key: consume_bug(worker_url, runner_secret, key),
         admin_emails=admin_emails,
+        worker_url=worker_url,
+        unsubscribe_secret=runner_secret,
     )
 
 
