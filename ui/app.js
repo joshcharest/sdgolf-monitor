@@ -15,6 +15,7 @@ const TOAST = document.getElementById("toast");
 // In-memory cache of configs we've loaded this session: id → cfg object
 const CACHE = new Map();
 let USER = null;  // { email } once signed in
+let LIST_FILTER = "mine";  // "mine" | "others" — persists across renderList calls
 
 // ----- Toast -------------------------------------------------------------
 
@@ -136,7 +137,7 @@ function renderAuth() {
 }
 
 async function renderList() {
-  ROOT.innerHTML = "<p class='loading'>Loading check sets…</p>";
+  ROOT.innerHTML = "<p class='loading'>Loading subscriptions…</p>";
   setNav({ showNew: true });
 
   let configs;
@@ -144,7 +145,7 @@ async function renderList() {
     configs = await apiListConfigs();
   } catch (e) {
     if (e.status === 401) return renderAuth();
-    ROOT.innerHTML = `<p class='error'>Failed to list configs: ${e.message}</p>`;
+    ROOT.innerHTML = `<p class='error'>Failed to load subscriptions: ${e.message}</p>`;
     return;
   }
 
@@ -152,23 +153,51 @@ async function renderList() {
   ROOT.innerHTML = "";
   ROOT.appendChild(view);
 
-  const cardsEl = document.getElementById("cards");
-  const emptyEl = document.getElementById("cards-empty");
-
   const snapshot = await loadSnapshot();
   renderSnapshotMeta(snapshot);
   const setsById = snapshot?.sets || {};
 
   for (const cfg of configs) CACHE.set(cfg.id, cfg);
 
-  if (configs.length === 0) {
-    emptyEl.hidden = false;
-    return;
+  // Wire tabs once after the view is mounted.
+  for (const tab of document.querySelectorAll(".list-tab")) {
+    tab.addEventListener("click", () => {
+      LIST_FILTER = tab.dataset.filter;
+      renderTabCards(configs, setsById);
+    });
   }
 
-  configs.sort((a, b) => a.name.localeCompare(b.name));
-  for (const cfg of configs) {
-    cardsEl.appendChild(renderCard(cfg, setsById[cfg.id]));
+  renderTabCards(configs, setsById);
+}
+
+function renderTabCards(configs, setsById) {
+  const mine = configs.filter(c => c.owner === USER.email);
+  const others = configs.filter(c => c.owner !== USER.email);
+
+  // Update tab labels with counts; mark the active one.
+  const mineTab = document.querySelector('.list-tab[data-filter="mine"]');
+  const othersTab = document.querySelector('.list-tab[data-filter="others"]');
+  mineTab.textContent = `My subscriptions (${mine.length})`;
+  othersTab.textContent = `Other subscriptions (${others.length})`;
+  mineTab.classList.toggle("active", LIST_FILTER === "mine");
+  othersTab.classList.toggle("active", LIST_FILTER === "others");
+
+  const visible = (LIST_FILTER === "mine" ? mine : others)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const cardsEl = document.getElementById("cards");
+  cardsEl.innerHTML = "";
+  for (const cfg of visible) cardsEl.appendChild(renderCard(cfg, setsById[cfg.id]));
+
+  const emptyEl = document.getElementById("cards-empty");
+  if (visible.length === 0) {
+    emptyEl.textContent = LIST_FILTER === "mine"
+      ? "No subscriptions yet — click ＋ New subscription to create one."
+      : "No one else has shared a subscription yet.";
+    emptyEl.hidden = false;
+  } else {
+    emptyEl.hidden = true;
   }
 }
 
@@ -499,11 +528,11 @@ function fmt12h(t) {
 function renderEdit(existingId) {
   const cached = existingId ? CACHE.get(existingId) : null;
   if (existingId && !cached) {
-    toast("Could not find that check set", "error");
+    toast("Could not find that subscription", "error");
     return renderList();
   }
   if (cached && cached.owner !== USER.email) {
-    toast("You can only edit your own check sets", "error");
+    toast("You can only edit your own subscriptions", "error");
     return renderList();
   }
 
@@ -520,7 +549,7 @@ function renderEdit(existingId) {
   setNav({ showNew: false });
 
   const isNew = !existingId;
-  document.getElementById("edit-title").textContent = isNew ? "New check set" : `Edit ${cfg.name}`;
+  document.getElementById("edit-title").textContent = isNew ? "New subscription" : `Edit ${cfg.name}`;
 
   const form = document.getElementById("edit-form");
   form.elements["name"].value = cfg.name || "";
@@ -544,7 +573,7 @@ function renderEdit(existingId) {
   if (!isNew) {
     deleteBtn.hidden = false;
     deleteBtn.addEventListener("click", async () => {
-      if (!confirm(`Delete check set "${cfg.name}"?`)) return;
+      if (!confirm(`Delete subscription "${cfg.name}"?`)) return;
       try {
         await apiDeleteConfig(existingId);
         CACHE.delete(existingId);
