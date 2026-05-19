@@ -8,6 +8,7 @@ import { TEESHEETS, BOOKING_CLASSES } from "./schema.js";
 
 const ROOT = document.getElementById("root");
 const NEW_BTN = document.getElementById("new-btn");
+const ADMIN_BTN = document.getElementById("admin-btn");
 const SIGNOUT_BTN = document.getElementById("signout-btn");
 const USER_BADGE = document.getElementById("user-badge");
 const TOAST = document.getElementById("toast");
@@ -59,6 +60,8 @@ const apiUpdateConfig  = (id, cfg)       => api("PUT",    `/api/configs/${id}`, 
 const apiDeleteConfig  = (id)            => api("DELETE", `/api/configs/${id}`);
 const apiSubscribe     = (id)            => api("POST",   `/api/configs/${id}/subscribe`);
 const apiUnsubscribe   = (id)            => api("POST",   `/api/configs/${id}/unsubscribe`);
+const apiAdminGetEmails = ()             => api("GET",    "/api/admin/emails");
+const apiAdminPutEmails = (emails)       => api("PUT",    "/api/admin/emails", { emails });
 
 // Fire-and-forget: tell the Worker to dispatch the monitor workflow right
 // now so the snapshot reflects this config mutation within ~30s instead of
@@ -73,6 +76,7 @@ function triggerDispatch() {
 
 function setNav({ showNew = false } = {}) {
   NEW_BTN.hidden = !showNew;
+  ADMIN_BTN.hidden = !(USER && USER.is_admin && showNew);
   SIGNOUT_BTN.hidden = !USER;
   USER_BADGE.hidden = !USER;
   if (USER) USER_BADGE.textContent = USER.email;
@@ -760,9 +764,65 @@ function readDateSpec(form, which) {
   return v;
 }
 
+// ----- Admin view --------------------------------------------------------
+
+async function renderAdmin() {
+  if (!USER?.is_admin) return renderList();
+  ROOT.innerHTML = "<p class='loading'>Loading allowed emails…</p>";
+  setNav({ showNew: false });
+
+  let emails;
+  try {
+    ({ emails } = await apiAdminGetEmails());
+  } catch (e) {
+    if (e.status === 401) return renderAuth();
+    if (e.status === 403) { toast("Admin access only", "error"); return renderList(); }
+    ROOT.innerHTML = `<p class='error'>Failed to load: ${e.message}</p>`;
+    return;
+  }
+
+  ROOT.innerHTML = "";
+  const view = document.getElementById("admin-view").content.cloneNode(true);
+  ROOT.appendChild(view);
+
+  const form = document.getElementById("admin-form");
+  const textarea = form.elements["emails"];
+  textarea.value = emails.join("\n");
+  const err = document.getElementById("admin-error");
+
+  document.getElementById("admin-cancel").addEventListener("click", () => renderList());
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.hidden = true;
+    const submitBtn = form.querySelector("button[type=submit]");
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Saving…";
+    const next = textarea.value
+      .split(/[\n,]/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    try {
+      const { emails: saved } = await apiAdminPutEmails(next);
+      textarea.value = saved.join("\n");
+      const dropped = next.length - saved.length;
+      toast(dropped > 0
+        ? `Saved ${saved.length} emails (${dropped} invalid dropped)`
+        : `Saved ${saved.length} emails`);
+    } catch (e2) {
+      err.textContent = `Save failed: ${e2.message}`;
+      err.hidden = false;
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Save";
+    }
+  });
+}
+
 // ----- Boot --------------------------------------------------------------
 
 NEW_BTN.addEventListener("click", () => renderEdit(null));
+ADMIN_BTN.addEventListener("click", () => renderAdmin());
 SIGNOUT_BTN.addEventListener("click", async () => {
   if (!confirm("Sign out?")) return;
   try { await apiLogout(); } catch { /* ignore */ }
