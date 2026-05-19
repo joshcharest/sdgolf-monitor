@@ -3,10 +3,43 @@
 from __future__ import annotations
 
 import smtplib
-from datetime import datetime
+from datetime import date, datetime
 from email.message import EmailMessage
+from html import escape as html_escape
 
 from .client import TeeTime
+
+
+# Course name -> ForeUp teesheet (schedule) id. Used to construct booking
+# deep-links per match. Mirrors ui/schema.js TEESHEETS. Keep in sync.
+_TEESHEET_IDS = {
+    "Balboa Park 18":     1470,
+    "Balboa Park 9":      1490,
+    "Torrey Pines North": 1468,
+    "Torrey Pines South": 1487,
+}
+
+
+def _booking_url(target: str, date_iso: str) -> str | None:
+    """ForeUp deep-link for one slot, or None if we can't construct one.
+
+    Booking class 929 = resident 0-7 day; 51735 = resident 8-90 day. Decide
+    based on the slot's date, not the API's booking_fee flag (which is
+    unreliable for Torrey under 929).
+    """
+    ts_id = _TEESHEET_IDS.get(target)
+    if not ts_id:
+        return None
+    try:
+        slot = date.fromisoformat(date_iso)
+        is_advanced = (slot - date.today()).days >= 8
+    except ValueError:
+        return None
+    booking_class = 51735 if is_advanced else 929
+    base = f"https://foreupsoftware.com/index.php/booking/19348/{booking_class}"
+    parts = date_iso.split("-")
+    y, mo, d = parts
+    return f"{base}?date={mo}-{d}-{y}&schedule_id={ts_id}#/teetimes"
 
 
 def send_email(
@@ -54,6 +87,9 @@ def _plaintext(new_times: list[TeeTime]) -> str:
             f"  {tt.date} {tt.time}  {tt.target}  "
             f"{tt.available_spots} spots  {tt.holes}h  {fee}{bf}"
         )
+        url = _booking_url(tt.target, tt.date)
+        if url:
+            lines.append(f"    {url}")
     lines.append(f"\nfetched {datetime.now().isoformat(timespec='seconds')}")
     return "\n".join(lines)
 
@@ -63,9 +99,16 @@ def _html(new_times: list[TeeTime]) -> str:
     for tt in sorted(new_times, key=lambda t: (t.date, t.time, t.target)):
         fee = f"${tt.green_fee:.0f}" if tt.green_fee is not None else "?"
         bf = f"+${tt.booking_fee:.0f}" if tt.booking_fee else ""
+        url = _booking_url(tt.target, tt.date)
+        time_cell = (
+            f'<a href="{html_escape(url, quote=True)}">{html_escape(tt.time)}</a>'
+            if url else html_escape(tt.time)
+        )
         rows.append(
-            f"<tr><td>{tt.date}</td><td>{tt.time}</td><td>{tt.target}</td>"
-            f"<td>{tt.available_spots}</td><td>{tt.holes}h</td><td>{fee} {bf}</td></tr>"
+            f"<tr><td>{html_escape(tt.date)}</td><td>{time_cell}</td>"
+            f"<td>{html_escape(tt.target)}</td>"
+            f"<td>{tt.available_spots}</td><td>{tt.holes}h</td>"
+            f"<td>{html_escape(fee)} {html_escape(bf)}</td></tr>"
         )
     return (
         "<table style='border-collapse:collapse' cellpadding='6'>"
