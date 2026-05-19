@@ -803,12 +803,13 @@ async function renderAdmin() {
       .map(s => s.trim())
       .filter(Boolean);
     try {
-      const { emails: saved } = await apiAdminPutEmails(next);
+      const { emails: saved, removed } = await apiAdminPutEmails(next);
       textarea.value = saved.join("\n");
-      const dropped = next.length - saved.length;
-      toast(dropped > 0
-        ? `Saved ${saved.length} emails (${dropped} invalid dropped)`
-        : `Saved ${saved.length} emails`);
+      const parts = [`Saved ${saved.length} email${saved.length === 1 ? "" : "s"}`];
+      if (removed && removed.length > 0) {
+        parts.push(`${removed.length} signed out: ${removed.join(", ")}`);
+      }
+      toast(parts.join(" — "));
     } catch (e2) {
       err.textContent = `Save failed: ${e2.message}`;
       err.hidden = false;

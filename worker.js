@@ -182,10 +182,21 @@ async function handleAdminPutEmails(request, env) {
   const cleaned = body.emails
     .map(e => String(e).trim().toLowerCase())
     .filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
-  // Always include the admins so an accidental save can't lock the admin out.
-  const final = [...new Set([...adminEmails(env), ...cleaned])].sort();
+  const admins = new Set(adminEmails(env));
+  // Always keep admins on the list so a save can't lock the admin out.
+  const final = [...new Set([...admins, ...cleaned])].sort();
+
+  // Anyone dropped from the previous list (and not an admin) gets their
+  // user record deleted, which kills their session on the next API call
+  // and prevents them from re-logging-in.
+  const previous = new Set(await readAllowedEmails(env));
+  const removed = [...previous].filter(e => !final.includes(e) && !admins.has(e));
+  for (const email of removed) {
+    await env.SNAPSHOT_KV.delete(`user:${email}`);
+  }
+
   await env.SNAPSHOT_KV.put("allowed_emails", JSON.stringify(final));
-  return json({ emails: final });
+  return json({ emails: final, removed });
 }
 
 async function handleLogin(request, env) {
@@ -224,7 +235,16 @@ async function getSession(request, env) {
   if (!env.SESSION_SECRET) return null;
   const token = readCookie(request, COOKIE_NAME);
   if (!token) return null;
-  return await verifySession(token, env.SESSION_SECRET);
+  const payload = await verifySession(token, env.SESSION_SECRET);
+  if (!payload) return null;
+  // Re-verify the user record still exists in KV — admins can revoke a user
+  // by removing them from the allow list, which deletes user:<email>.
+  // Without this check, a stolen-cookie or removed-user would keep working
+  // until the cookie's 30-day expiry.
+  if (!env.SNAPSHOT_KV) return null;
+  const userRec = await env.SNAPSHOT_KV.get(`user:${payload.email}`);
+  if (!userRec) return null;
+  return payload;
 }
 
 async function sessionResponse(email, env, status) {
