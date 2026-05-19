@@ -1,12 +1,19 @@
 // Cloudflare Worker entry. Responsibilities:
-//   - GET  /api/snapshot       -> return the latest tee-time snapshot from KV
-//   - POST /api/dispatch       -> trigger an immediate monitor run on demand
-//   - POST /api/auth/signup    -> create a user account (gated by INVITE_CODE)
-//   - POST /api/auth/login     -> exchange email+password for a session cookie
-//   - POST /api/auth/logout    -> clear the session cookie
-//   - GET  /api/me             -> return the signed-in user, or 401
-//   - everything else          -> fall through to the static assets in ui/
-//   - scheduled cron           -> dispatch the GitHub monitor workflow on time
+//   - GET  /api/snapshot                       latest tee-time snapshot from KV
+//   - POST /api/dispatch                       trigger an immediate monitor run
+//   - POST /api/auth/signup                    create account (gated by INVITE_CODE)
+//   - POST /api/auth/login                     exchange email+password -> session
+//   - POST /api/auth/logout                    clear session cookie
+//   - GET  /api/me                             return signed-in user or 401
+//   - GET  /api/configs                        list all configs (auth required)
+//   - POST /api/configs                        create config (auth, owner=session)
+//   - PUT  /api/configs/:id                    update (auth + ownership check)
+//   - DEL  /api/configs/:id                    delete (auth + ownership check)
+//   - POST /api/configs/:id/subscribe          add session email to subscribers
+//   - POST /api/configs/:id/unsubscribe        remove session email
+//   - GET  /api/internal/configs               runner-only (Bearer RUNNER_SECRET)
+//   - everything else                          static assets in ui/
+//   - scheduled cron                           dispatch the GH monitor workflow
 
 export default {
   async fetch(request, env) {
@@ -23,6 +30,20 @@ export default {
     if (pathname === "/api/auth/login"  && method === "POST") return handleLogin(request, env);
     if (pathname === "/api/auth/logout" && method === "POST") return handleLogout();
     if (pathname === "/api/me"          && method === "GET")  return handleMe(request, env);
+
+    if (pathname === "/api/internal/configs" && method === "GET") return handleInternalConfigs(request, env);
+
+    if (pathname === "/api/configs" && method === "GET")  return handleListConfigs(request, env);
+    if (pathname === "/api/configs" && method === "POST") return handleCreateConfig(request, env);
+
+    const configMatch = pathname.match(/^\/api\/configs\/([a-z0-9-]{1,128})(?:\/(subscribe|unsubscribe))?$/);
+    if (configMatch) {
+      const [, id, action] = configMatch;
+      if (!action && method === "PUT")    return handleUpdateConfig(request, env, id);
+      if (!action && method === "DELETE") return handleDeleteConfig(request, env, id);
+      if (action === "subscribe"   && method === "POST") return handleSubscribe(request, env, id, true);
+      if (action === "unsubscribe" && method === "POST") return handleSubscribe(request, env, id, false);
+    }
 
     return env.ASSETS.fetch(request);
   },
@@ -148,6 +169,143 @@ async function sessionResponse(email, env, status) {
       "Set-Cookie": cookieHeader(COOKIE_NAME, token, SESSION_TTL_SEC),
     },
   });
+}
+
+// ---------- configs CRUD ---------------------------------------------------
+
+async function handleListConfigs(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const configs = await loadAllConfigs(env);
+  return json(configs);
+}
+
+async function handleCreateConfig(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const body = await safeJson(request);
+  const err = validateConfigPayload(body);
+  if (err) return json({ error: err }, 400);
+  const id = `${slugify(body.name)}-${randomIdSuffix()}`;
+  const now = new Date().toISOString();
+  const config = buildConfig({}, body, {
+    id,
+    owner: session.email,
+    subscribers: [],
+    created_at: now,
+    updated_at: now,
+  });
+  await env.SNAPSHOT_KV.put(`config:${id}`, JSON.stringify(config));
+  return json(config, 201);
+}
+
+async function handleUpdateConfig(request, env, id) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const existing = await readConfig(env, id);
+  if (!existing) return json({ error: "not found" }, 404);
+  if (existing.owner !== session.email) return json({ error: "forbidden" }, 403);
+  const body = await safeJson(request);
+  const err = validateConfigPayload(body);
+  if (err) return json({ error: err }, 400);
+  const updated = buildConfig(existing, body, {
+    id: existing.id,
+    owner: existing.owner,                            // owner is immutable
+    subscribers: existing.subscribers || [],          // can't edit subscribers via PUT
+    created_at: existing.created_at,
+    updated_at: new Date().toISOString(),
+  });
+  await env.SNAPSHOT_KV.put(`config:${id}`, JSON.stringify(updated));
+  return json(updated);
+}
+
+async function handleDeleteConfig(request, env, id) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const existing = await readConfig(env, id);
+  if (!existing) return json({ error: "not found" }, 404);
+  if (existing.owner !== session.email) return json({ error: "forbidden" }, 403);
+  await env.SNAPSHOT_KV.delete(`config:${id}`);
+  return new Response(null, { status: 204 });
+}
+
+async function handleSubscribe(request, env, id, subscribing) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const existing = await readConfig(env, id);
+  if (!existing) return json({ error: "not found" }, 404);
+  const subs = new Set(existing.subscribers || []);
+  if (subscribing) subs.add(session.email); else subs.delete(session.email);
+  // The owner is implicitly always notified; never let them subscribe themselves.
+  subs.delete(existing.owner);
+  existing.subscribers = [...subs];
+  existing.updated_at = new Date().toISOString();
+  await env.SNAPSHOT_KV.put(`config:${id}`, JSON.stringify(existing));
+  return json(existing);
+}
+
+async function handleInternalConfigs(request, env) {
+  const auth = request.headers.get("Authorization") || "";
+  const provided = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (!env.RUNNER_SECRET || !constantTimeEqStr(provided, env.RUNNER_SECRET)) {
+    return json({ error: "forbidden" }, 403);
+  }
+  const configs = await loadAllConfigs(env);
+  return json(configs);
+}
+
+async function requireSession(request, env) {
+  const session = await getSession(request, env);
+  if (!session) return json({ error: "not signed in" }, 401);
+  return session;
+}
+
+async function readConfig(env, id) {
+  if (!/^[a-z0-9-]{1,128}$/.test(id)) return null;
+  const v = await env.SNAPSHOT_KV.get(`config:${id}`);
+  return v ? JSON.parse(v) : null;
+}
+
+async function loadAllConfigs(env) {
+  // KV list pagination: 1000 keys per page is plenty for foreseeable use.
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.SNAPSHOT_KV.list({ prefix: "config:", cursor });
+    const values = await Promise.all(page.keys.map(k => env.SNAPSHOT_KV.get(k.name)));
+    for (const v of values) if (v) out.push(JSON.parse(v));
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return out;
+}
+
+function buildConfig(existing, body, overrides) {
+  return {
+    name: typeof body.name === "string" ? body.name : existing.name,
+    enabled: body.enabled !== undefined ? Boolean(body.enabled) : (existing.enabled ?? true),
+    targets: Array.isArray(body.targets) ? body.targets : (existing.targets || []),
+    dates: body.dates && typeof body.dates === "object" ? body.dates : (existing.dates || {}),
+    filter: body.filter && typeof body.filter === "object" ? body.filter : (existing.filter || {}),
+    ...overrides,
+  };
+}
+
+function validateConfigPayload(body) {
+  if (!body || typeof body !== "object") return "invalid body";
+  if (!body.name || typeof body.name !== "string") return "name required";
+  if (!Array.isArray(body.targets) || body.targets.length === 0) return "at least one target required";
+  if (!body.dates || typeof body.dates !== "object") return "dates required";
+  if (!body.filter || typeof body.filter !== "object") return "filter required";
+  return null;
+}
+
+function slugify(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "set";
+}
+
+function randomIdSuffix() {
+  const bytes = crypto.getRandomValues(new Uint8Array(2));
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ---------- crypto helpers -------------------------------------------------
