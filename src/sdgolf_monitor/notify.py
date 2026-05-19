@@ -42,6 +42,79 @@ def _booking_url(target: str, date_iso: str) -> str | None:
     return f"{base}?date={mo}-{d}-{y}&schedule_id={ts_id}#/teetimes"
 
 
+# Map ForeUp's published (non-resident) green-fee to the SD City Resident
+# equivalent, per course. Source: sandiegocitygolf.com rate cards (2026).
+# Mirror of ui/app.js RATE_MAP — keep in sync.
+_RATE_MAP = {
+    "Balboa Park 18": {
+        56.50: 39.50,   # weekday 18
+        71:    49,      # weekend 18
+        34:    25,      # weekday 18 twilight
+        43:    30,      # weekend 18 twilight
+        39:    35,      # weekday 18 junior
+        25.50: 18,      # weekday 9
+        32:    24,      # weekend 9
+        19.50: 17,      # weekday 9 junior
+    },
+    "Balboa Park 9":  {25.50: 18, 32: 24, 19.50: 17},
+    "Torrey Pines South": {258: 73, 180: 73, 156: 44, 322: 90, 194: 54},
+    "Torrey Pines North": {163: 51, 114: 51, 97: 33, 204: 68, 123: 39},
+}
+
+_ADVANCED_BOOKING_FEE = {
+    "Balboa Park 18":     10,
+    "Balboa Park 9":      10,
+    "Torrey Pines South": 32,
+    "Torrey Pines North": 32,
+}
+
+
+def _resident_rate(target: str, non_resident: float | None) -> float | None:
+    if non_resident is None:
+        return None
+    return _RATE_MAP.get(target, {}).get(non_resident)
+
+
+def _has_advanced_fee(date_iso: str) -> bool:
+    try:
+        slot = date.fromisoformat(date_iso)
+        return (slot - date.today()).days >= 8
+    except ValueError:
+        return False
+
+
+def _fmt_money(amount: float) -> str:
+    return f"${amount:g}" if amount == int(amount) else f"${amount:.2f}"
+
+
+def _fee_text(target: str, non_resident: float | None, date_iso: str) -> str:
+    rate = _resident_rate(target, non_resident)
+    base = _fmt_money(rate) if rate is not None else "?"
+    if not _has_advanced_fee(date_iso):
+        return base
+    abf = _ADVANCED_BOOKING_FEE.get(target)
+    return f"{base} + ${abf} Advanced Booking Fee" if abf is not None else f"{base} + Advanced Booking Fee"
+
+
+def _fmt_date(spec: str) -> str:
+    try:
+        d = date.fromisoformat(spec)
+        return f"{d.strftime('%a')} {d.month}/{d.day}"
+    except ValueError:
+        return spec
+
+
+def _fmt_12h(t: str) -> str:
+    try:
+        h_s, m_s = t.split(":")
+        h = int(h_s); m = int(m_s)
+    except (ValueError, AttributeError):
+        return t
+    period = "PM" if h >= 12 else "AM"
+    h = h % 12 or 12
+    return f"{h} {period}" if m == 0 else f"{h}:{m:02d} {period}"
+
+
 def send_email(
     *,
     smtp_user: str,
@@ -81,11 +154,10 @@ def _subject(set_name: str, new_times: list[TeeTime]) -> str:
 def _plaintext(new_times: list[TeeTime]) -> str:
     lines = ["New tee times matching your filter:\n"]
     for tt in sorted(new_times, key=lambda t: (t.date, t.time, t.target)):
-        fee = f"${tt.green_fee:.0f}" if tt.green_fee is not None else "?"
-        bf = f" (+${tt.booking_fee:.0f} booking fee)" if tt.booking_fee else ""
         lines.append(
-            f"  {tt.date} {tt.time}  {tt.target}  "
-            f"{tt.available_spots} spots  {tt.holes}h  {fee}{bf}"
+            f"  {_fmt_date(tt.date)}  {_fmt_12h(tt.time)}  {tt.target}  "
+            f"{tt.available_spots} spots  {tt.holes}  "
+            f"{_fee_text(tt.target, tt.green_fee, tt.date)}"
         )
         url = _booking_url(tt.target, tt.date)
         if url:
@@ -97,18 +169,18 @@ def _plaintext(new_times: list[TeeTime]) -> str:
 def _html(new_times: list[TeeTime]) -> str:
     rows = []
     for tt in sorted(new_times, key=lambda t: (t.date, t.time, t.target)):
-        fee = f"${tt.green_fee:.0f}" if tt.green_fee is not None else "?"
-        bf = f"+${tt.booking_fee:.0f}" if tt.booking_fee else ""
+        fee_text = _fee_text(tt.target, tt.green_fee, tt.date)
+        time_str = _fmt_12h(tt.time)
         url = _booking_url(tt.target, tt.date)
         time_cell = (
-            f'<a href="{html_escape(url, quote=True)}">{html_escape(tt.time)}</a>'
-            if url else html_escape(tt.time)
+            f'<a href="{html_escape(url, quote=True)}">{html_escape(time_str)}</a>'
+            if url else html_escape(time_str)
         )
         rows.append(
-            f"<tr><td>{html_escape(tt.date)}</td><td>{time_cell}</td>"
+            f"<tr><td>{html_escape(_fmt_date(tt.date))}</td><td>{time_cell}</td>"
             f"<td>{html_escape(tt.target)}</td>"
-            f"<td>{tt.available_spots}</td><td>{tt.holes}h</td>"
-            f"<td>{html_escape(fee)} {html_escape(bf)}</td></tr>"
+            f"<td>{tt.available_spots}</td><td>{tt.holes}</td>"
+            f"<td>{html_escape(fee_text)}</td></tr>"
         )
     return (
         "<table style='border-collapse:collapse' cellpadding='6'>"
