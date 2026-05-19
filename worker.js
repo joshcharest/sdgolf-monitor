@@ -102,8 +102,11 @@ async function dispatchMonitor(env) {
 
 const COOKIE_NAME = "sdgolf_session";
 const SESSION_TTL_SEC = 30 * 24 * 60 * 60;  // 30 days
-const PBKDF2_ITERATIONS = 600_000;          // OWASP 2023 PBKDF2-SHA256
-const PASSWORD_HASH_VERSION = 2;            // v1 = 100k iter, no pepper; v2 = 600k + pepper
+// 600k iter is OWASP 2023, but Cloudflare Workers Free has a hard 10ms CPU
+// budget per request and ~600k blows past it. 100k fits with margin and the
+// pepper does most of the heavy lifting against offline cracking anyway.
+const PBKDF2_ITERATIONS = 100_000;
+const PASSWORD_HASH_VERSION = 2;  // v1 = no pepper; v2 = pepper-prefixed input
 
 async function handleSignup(request, env) {
   if (!authSecretsReady(env)) return json({ error: "auth not configured" }, 503);
@@ -215,17 +218,9 @@ async function handleLogin(request, env) {
   if (!await verifyPassword(password, user, env)) {
     return json({ error: "invalid credentials" }, 401);
   }
-  // Transparent upgrade: if this account is on an older hash format (v1, or
-  // fewer iterations than the current standard), re-hash with the current
-  // params and overwrite the record. Cost is one extra PBKDF2 + one KV write
-  // per login until everyone is on v2.
-  if (needsHashUpgrade(user)) {
-    const upgraded = await hashPassword(password, env);
-    await env.SNAPSHOT_KV.put(`user:${email}`, JSON.stringify({
-      ...upgraded,
-      created_at: user.created_at,
-    }));
-  }
+  // No auto-upgrade: running pbkdf2 a second time in the same request
+  // exceeds the Workers Free 10ms CPU budget and returns 500. v1 records
+  // (no pepper) remain valid for verification; new signups are v2.
   return sessionResponse(email, env, 200);
 }
 
@@ -473,10 +468,6 @@ async function verifyPassword(password, stored, env) {
   return constantTimeEqBytes(bits, b64decode(stored.hash));
 }
 
-function needsHashUpgrade(stored) {
-  return stored?.version !== PASSWORD_HASH_VERSION
-    || stored?.iterations !== PBKDF2_ITERATIONS;
-}
 
 async function pbkdf2(password, salt, iterations) {
   const key = await crypto.subtle.importKey(
