@@ -400,27 +400,75 @@ main {
   letter-spacing: 0.06em;
   color: var(--text-muted);
 }
-.card-matches-list li.more {
-  text-align: center;
+/* Course header — a section divider before each course's days */
+.card-matches-list li.match-course-header {
   border-bottom: none;
-  padding-top: 10px;
-}
-.card-matches-list li.more .show-more {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 500;
+  padding: 12px 2px 2px;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  padding: 6px 16px;
-}
-.card-matches-list li.more .show-more:hover {
   color: var(--accent);
-  border-color: var(--accent-deep);
-  background: rgba(201, 169, 106, 0.06);
+  font-variation-settings: 'opsz' 24, 'SOFT' 80;
 }
+.card-matches-list li.match-course-header:first-child { padding-top: 4px; }
+
+/* Day row — clickable button that expands the times underneath */
+.card-matches-list li.match-day-row {
+  border-bottom: 1px dashed var(--border-soft);
+  padding: 0;
+  display: block;
+}
+.match-day-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  border: none;
+  padding: 9px 4px;
+  margin: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius);
+  transition: color 0.15s, background 0.15s;
+}
+.match-day-toggle:hover { color: var(--text); background: rgba(201, 169, 106, 0.04); }
+.match-day-toggle.expanded { color: var(--text); }
+.match-day-label { flex: 1 1 auto; }
+.match-day-chevron {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0;
+  flex: none;
+  margin-left: 8px;
+}
+
+/* Expanded times list — indented under each day */
+.match-times-list {
+  list-style: none;
+  padding: 2px 0 8px 14px;
+  margin: 0 0 4px 6px;
+  border-left: 1px solid var(--border-soft);
+}
+.match-times-list li {
+  padding: 0;
+  border-bottom: 1px dashed var(--border-soft);
+}
+.match-times-list li:last-child { border-bottom: none; }
+
+/* Time row — the link inside each time slot */
+.match-time-primary {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.match-time .match-when { color: var(--accent); }
 
 /* ---------- Snapshot meta line --------------------------------------- */
 
@@ -855,8 +903,10 @@ form .hint code {
   .check-card h3.card-name { font-size: 18px; }
   .check-card ul.card-meta { font-size: 13.5px; gap: 5px; }
   .check-card ul.card-meta .card-targets { gap: 3px; padding-bottom: 5px; }
-  .match-primary { font-size: 14px; }
+  .match-time-primary { font-size: 14px; }
   .match-meta { font-size: 11.5px; }
+  .match-day-toggle { font-size: 13px; padding: 11px 4px; }
+  .match-course-header { font-size: 12.5px; }
   /* Two-row header: name + toggle on top, chip + edit underneath */
   .check-card header {
     grid-template-columns: 1fr auto;
