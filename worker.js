@@ -99,7 +99,8 @@ async function dispatchMonitor(env) {
 
 const COOKIE_NAME = "sdgolf_session";
 const SESSION_TTL_SEC = 30 * 24 * 60 * 60;  // 30 days
-const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_ITERATIONS = 600_000;          // OWASP 2023 PBKDF2-SHA256
+const PASSWORD_HASH_VERSION = 2;            // v1 = 100k iter, no pepper; v2 = 600k + pepper
 
 async function handleSignup(request, env) {
   if (!authSecretsReady(env)) return json({ error: "auth not configured" }, 503);
@@ -114,7 +115,7 @@ async function handleSignup(request, env) {
   if (await env.SNAPSHOT_KV.get(`user:${email}`)) {
     return json({ error: "account already exists" }, 409);
   }
-  const stored = await hashPassword(password);
+  const stored = await hashPassword(password, env);
   await env.SNAPSHOT_KV.put(`user:${email}`, JSON.stringify({
     ...stored,
     created_at: new Date().toISOString(),
@@ -208,8 +209,19 @@ async function handleLogin(request, env) {
   const userJson = await env.SNAPSHOT_KV.get(`user:${email}`);
   if (!userJson) return json({ error: "invalid credentials" }, 401);
   const user = JSON.parse(userJson);
-  if (!await verifyPassword(password, user)) {
+  if (!await verifyPassword(password, user, env)) {
     return json({ error: "invalid credentials" }, 401);
+  }
+  // Transparent upgrade: if this account is on an older hash format (v1, or
+  // fewer iterations than the current standard), re-hash with the current
+  // params and overwrite the record. Cost is one extra PBKDF2 + one KV write
+  // per login until everyone is on v2.
+  if (needsHashUpgrade(user)) {
+    const upgraded = await hashPassword(password, env);
+    await env.SNAPSHOT_KV.put(`user:${email}`, JSON.stringify({
+      ...upgraded,
+      created_at: user.created_at,
+    }));
   }
   return sessionResponse(email, env, 200);
 }
@@ -228,7 +240,7 @@ async function handleMe(request, env) {
 }
 
 function authSecretsReady(env) {
-  return Boolean(env.SNAPSHOT_KV && env.SESSION_SECRET && env.ALLOWED_EMAILS);
+  return Boolean(env.SNAPSHOT_KV && env.SESSION_SECRET && env.ALLOWED_EMAILS && env.PASSWORD_PEPPER);
 }
 
 async function getSession(request, env) {
@@ -399,21 +411,31 @@ function randomIdSuffix() {
 
 // ---------- crypto helpers -------------------------------------------------
 
-async function hashPassword(password) {
+async function hashPassword(password, env) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const bits = await pbkdf2(password, salt, PBKDF2_ITERATIONS);
+  const bits = await pbkdf2(password + env.PASSWORD_PEPPER, salt, PBKDF2_ITERATIONS);
   return {
+    version: PASSWORD_HASH_VERSION,
     hash: b64encode(bits),
     salt: b64encode(salt),
     iterations: PBKDF2_ITERATIONS,
   };
 }
 
-async function verifyPassword(password, stored) {
+async function verifyPassword(password, stored, env) {
   if (!stored?.hash || !stored?.salt || !stored?.iterations) return false;
   const salt = b64decode(stored.salt);
-  const bits = await pbkdf2(password, salt, stored.iterations);
+  // v2 records were hashed as (password + pepper). v1 (no version field) used
+  // password alone. Keep both verification paths so existing users keep
+  // working until they next log in and get auto-upgraded.
+  const input = stored.version === 2 ? password + env.PASSWORD_PEPPER : password;
+  const bits = await pbkdf2(input, salt, stored.iterations);
   return constantTimeEqBytes(bits, b64decode(stored.hash));
+}
+
+function needsHashUpgrade(stored) {
+  return stored?.version !== PASSWORD_HASH_VERSION
+    || stored?.iterations !== PBKDF2_ITERATIONS;
 }
 
 async function pbkdf2(password, salt, iterations) {
