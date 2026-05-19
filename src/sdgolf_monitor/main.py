@@ -20,8 +20,9 @@ from typing import Any
 
 import requests
 
+from . import notify
 from .client import ForeUpClient, TeeTime
-from .runner import SmtpCreds, run_check_set
+from .runner import SmtpCreds, recipients_for, run_check_set
 
 log = logging.getLogger("sdgolf")
 
@@ -32,6 +33,8 @@ def main(
     configs: list[dict[str, Any]],
     dry_run: bool = False,
     snapshot_path: Path | None = None,
+    pending: list[dict[str, Any]] | None = None,
+    pending_consume: "callable[[str], None] | None" = None,
 ) -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -61,6 +64,14 @@ def main(
         client.user["first_name"], client.user["last_name"], len(configs),
     )
 
+    # Group pending confirmations by config id so we can suppress the regular
+    # new-matches email for those recipients (they'll get the confirmation
+    # email with the same matches included; avoids a duplicate).
+    pending = pending or []
+    pending_by_config: dict[str, list[dict[str, Any]]] = {}
+    for p in pending:
+        pending_by_config.setdefault(p.get("config_id"), []).append(p)
+
     snapshot: dict[str, dict] = {}
     state_dir.mkdir(parents=True, exist_ok=True)
     for cfg in configs:
@@ -78,6 +89,11 @@ def main(
             snapshot[config_id] = {**common, "enabled": False, "matches": []}
             continue
 
+        pending_emails = {p.get("email") for p in pending_by_config.get(config_id, [])}
+        recipients_override = None
+        if pending_emails:
+            recipients_override = [r for r in recipients_for(cfg) if r not in pending_emails]
+
         try:
             matches = run_check_set(
                 client=client,
@@ -86,6 +102,7 @@ def main(
                 set_name=set_name,
                 dry_run=dry_run,
                 smtp=smtp,
+                recipients_override=recipients_override,
             )
             snapshot[config_id] = {
                 **common,
@@ -101,6 +118,35 @@ def main(
                 "matches": [],
             }
 
+    # Process pending confirmations after all check sets ran so we can attach
+    # the freshly computed current matches.
+    if pending and not dry_run and smtp is not None:
+        cfgs_by_id = {c["id"]: c for c in configs}
+        for p in pending:
+            cfg = cfgs_by_id.get(p.get("config_id"))
+            if not cfg:
+                log.warning("pending confirmation references missing config %s; dropping", p.get("config_id"))
+                if pending_consume:
+                    pending_consume(p["key"])
+                continue
+            matches_for_email = snapshot.get(p["config_id"], {}).get("matches") or []
+            try:
+                notify.send_confirmation_email(
+                    smtp_user=smtp.user,
+                    smtp_password=smtp.password,
+                    to_addr=p["email"],
+                    action=p.get("action", "subscribe"),
+                    cfg=cfg,
+                    current_matches=matches_for_email,
+                )
+                log.info("[%s] sent %s confirmation to %s", cfg.get("name"), p.get("action"), p["email"])
+            except Exception:
+                log.exception("failed to send confirmation for %s to %s; will retry next run",
+                              p.get("config_id"), p.get("email"))
+                continue  # don't consume; retry on next tick
+            if pending_consume:
+                pending_consume(p["key"])
+
     if snapshot_path:
         _write_snapshot(snapshot_path, snapshot)
 
@@ -115,6 +161,27 @@ def fetch_configs(worker_url: str, runner_secret: str) -> list[dict[str, Any]]:
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def fetch_pending(worker_url: str, runner_secret: str) -> list[dict[str, Any]]:
+    resp = requests.get(
+        f"{worker_url.rstrip('/')}/api/internal/pending",
+        headers={"Authorization": f"Bearer {runner_secret}"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def consume_pending(worker_url: str, runner_secret: str, key: str) -> None:
+    pending_id = key.removeprefix("pending:")
+    resp = requests.delete(
+        f"{worker_url.rstrip('/')}/api/internal/pending/{pending_id}",
+        headers={"Authorization": f"Bearer {runner_secret}"},
+        timeout=20,
+    )
+    if resp.status_code not in (200, 204, 404):
+        resp.raise_for_status()
 
 
 def _match_dict(tt: TeeTime) -> dict:
@@ -157,12 +224,19 @@ def cli() -> int:
     worker_url = _require_env("WORKER_URL")
     runner_secret = _require_env("RUNNER_SECRET")
     configs = fetch_configs(worker_url, runner_secret)
+    try:
+        pending = fetch_pending(worker_url, runner_secret)
+    except Exception:
+        log.exception("failed to fetch pending confirmations; continuing without them")
+        pending = []
 
     return main(
         args.state_dir,
         configs=configs,
         dry_run=args.dry_run,
         snapshot_path=args.snapshot_path,
+        pending=pending,
+        pending_consume=lambda key: consume_pending(worker_url, runner_secret, key),
     )
 
 

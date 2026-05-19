@@ -32,6 +32,9 @@ export default {
     if (pathname === "/api/me"          && method === "GET")  return handleMe(request, env);
 
     if (pathname === "/api/internal/configs" && method === "GET") return handleInternalConfigs(request, env);
+    if (pathname === "/api/internal/pending" && method === "GET") return handleInternalPending(request, env);
+    const pendingMatch = pathname.match(/^\/api\/internal\/pending\/([a-z0-9-]{1,128})$/);
+    if (pendingMatch && method === "DELETE") return handleInternalPendingDelete(request, env, pendingMatch[1]);
 
     if (pathname === "/api/admin/emails" && method === "GET") return handleAdminListEmails(request, env);
     if (pathname === "/api/admin/emails" && method === "PUT") return handleAdminPutEmails(request, env);
@@ -297,6 +300,7 @@ async function handleCreateConfig(request, env) {
     updated_at: now,
   });
   await env.SNAPSHOT_KV.put(`config:${id}`, JSON.stringify(config));
+  await stampPendingConfirmation(env, "create", session.email, id);
   return json(config, 201);
 }
 
@@ -335,6 +339,7 @@ async function handleSubscribe(request, env, id, subscribing) {
   if (session instanceof Response) return session;
   const existing = await readConfig(env, id);
   if (!existing) return json({ error: "not found" }, 404);
+  const wasSubscribed = (existing.subscribers || []).includes(session.email);
   const subs = new Set(existing.subscribers || []);
   if (subscribing) subs.add(session.email); else subs.delete(session.email);
   // The owner is implicitly always notified; never let them subscribe themselves.
@@ -342,17 +347,52 @@ async function handleSubscribe(request, env, id, subscribing) {
   existing.subscribers = [...subs];
   existing.updated_at = new Date().toISOString();
   await env.SNAPSHOT_KV.put(`config:${id}`, JSON.stringify(existing));
+  // Only stamp a confirmation for *new* subscriptions (not re-clicks or unsubscribes).
+  if (subscribing && !wasSubscribed && session.email !== existing.owner) {
+    await stampPendingConfirmation(env, "subscribe", session.email, id);
+  }
   return json(existing);
 }
 
 async function handleInternalConfigs(request, env) {
-  const auth = request.headers.get("Authorization") || "";
-  const provided = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (!env.RUNNER_SECRET || !constantTimeEqStr(provided, env.RUNNER_SECRET)) {
-    return json({ error: "forbidden" }, 403);
-  }
+  if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
   const configs = await loadAllConfigs(env);
   return json(configs);
+}
+
+async function handleInternalPending(request, env) {
+  if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.SNAPSHOT_KV.list({ prefix: "pending:", cursor });
+    const values = await Promise.all(page.keys.map(k => env.SNAPSHOT_KV.get(k.name)));
+    for (let i = 0; i < page.keys.length; i++) {
+      const v = values[i];
+      if (!v) continue;
+      try { out.push({ key: page.keys[i].name, ...JSON.parse(v) }); } catch { /* skip */ }
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return json(out);
+}
+
+async function handleInternalPendingDelete(request, env, id) {
+  if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  await env.SNAPSHOT_KV.delete(`pending:${id}`);
+  return new Response(null, { status: 204 });
+}
+
+function checkRunnerSecret(request, env) {
+  const auth = request.headers.get("Authorization") || "";
+  const provided = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  return Boolean(env.RUNNER_SECRET) && constantTimeEqStr(provided, env.RUNNER_SECRET);
+}
+
+async function stampPendingConfirmation(env, action, email, configId) {
+  const id = `${Date.now().toString(36)}-${randomIdSuffix()}`;
+  const record = { id, action, email, config_id: configId, ts: new Date().toISOString() };
+  await env.SNAPSHOT_KV.put(`pending:${id}`, JSON.stringify(record));
 }
 
 async function requireSession(request, env) {
