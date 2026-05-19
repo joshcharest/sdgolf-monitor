@@ -103,11 +103,10 @@ async function handleSignup(request, env) {
   const body = await safeJson(request);
   const email = normaliseEmail(body?.email);
   const password = typeof body?.password === "string" ? body.password : "";
-  const inviteCode = typeof body?.invite_code === "string" ? body.invite_code : "";
   if (!email || !password) return json({ error: "email and password required" }, 400);
   if (password.length < 8) return json({ error: "password must be at least 8 characters" }, 400);
-  if (!constantTimeEqStr(inviteCode, env.INVITE_CODE)) {
-    return json({ error: "invalid invite code" }, 403);
+  if (!emailIsAllowed(email, env)) {
+    return json({ error: "this email is not on the allow list — ask the admin to add it" }, 403);
   }
   if (await env.SNAPSHOT_KV.get(`user:${email}`)) {
     return json({ error: "account already exists" }, 409);
@@ -118,6 +117,15 @@ async function handleSignup(request, env) {
     created_at: new Date().toISOString(),
   }));
   return sessionResponse(email, env, 201);
+}
+
+function emailIsAllowed(email, env) {
+  if (!env.ALLOWED_EMAILS) return false;
+  const allowed = env.ALLOWED_EMAILS
+    .split(",")
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+  return allowed.includes(email);
 }
 
 async function handleLogin(request, env) {
@@ -149,7 +157,7 @@ async function handleMe(request, env) {
 }
 
 function authSecretsReady(env) {
-  return Boolean(env.SNAPSHOT_KV && env.SESSION_SECRET && env.INVITE_CODE);
+  return Boolean(env.SNAPSHOT_KV && env.SESSION_SECRET && env.ALLOWED_EMAILS);
 }
 
 async function getSession(request, env) {
