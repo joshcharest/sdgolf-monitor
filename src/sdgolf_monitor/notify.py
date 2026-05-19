@@ -104,6 +104,88 @@ def _fmt_date(spec: str) -> str:
         return spec
 
 
+def send_bug_report(
+    *,
+    smtp_user: str,
+    smtp_password: str,
+    to_addrs: list[str],
+    bug: dict,
+) -> None:
+    """Email a user-submitted bug report to the admin list."""
+    if not to_addrs or not bug:
+        return
+    reporter = bug.get("email", "?")
+    description = bug.get("description", "(none)")
+    short_desc = description.splitlines()[0][:80] if description else "(none)"
+    msg = EmailMessage()
+    msg["From"] = smtp_user
+    msg["To"] = ", ".join(to_addrs)
+    msg["Subject"] = f"[sdgolf:bug] {reporter}: {short_desc}"
+    msg.set_content(_bug_plaintext(bug))
+    msg.add_alternative(_bug_html(bug), subtype="html")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
+        smtp.login(smtp_user, smtp_password)
+        smtp.send_message(msg, to_addrs=to_addrs)
+
+
+def _bug_plaintext(b: dict) -> str:
+    lines = [
+        f"From:       {b.get('email', '?')}",
+        f"Reported:   {b.get('ts', '?')}",
+        f"View:       {b.get('view', '?')}",
+        f"URL:        {b.get('url', '?')}",
+        f"User agent: {b.get('user_agent', '?')}",
+        "",
+        "Description:",
+        b.get("description", "(none)"),
+        "",
+        f"Recent client logs ({len(b.get('logs') or [])}):",
+    ]
+    for entry in b.get("logs") or []:
+        ts = entry.get("ts", "?")
+        level = entry.get("level", "?")
+        msg = entry.get("msg", "")
+        lines.append(f"  [{ts}] {level}: {msg}")
+    return "\n".join(lines)
+
+
+def _bug_html(b: dict) -> str:
+    rows = []
+    for label, value in [
+        ("From", b.get("email", "?")),
+        ("Reported", b.get("ts", "?")),
+        ("View", b.get("view", "?")),
+        ("URL", b.get("url", "?")),
+        ("User agent", b.get("user_agent", "?")),
+    ]:
+        rows.append(
+            f"<tr><th style='text-align:left;padding:4px 12px 4px 0;color:#888'>{html_escape(label)}</th>"
+            f"<td style='padding:4px 0'>{html_escape(str(value))}</td></tr>"
+        )
+    log_rows = []
+    for entry in b.get("logs") or []:
+        log_rows.append(
+            f"<tr><td style='padding:2px 8px;color:#888'>{html_escape(entry.get('ts', ''))}</td>"
+            f"<td style='padding:2px 8px;font-weight:600'>{html_escape(entry.get('level', ''))}</td>"
+            f"<td style='padding:2px 8px;font-family:monospace;white-space:pre-wrap'>"
+            f"{html_escape(entry.get('msg', ''))}</td></tr>"
+        )
+    log_table = (
+        "<table style='border-collapse:collapse;font-size:12px'>" + "".join(log_rows) + "</table>"
+        if log_rows else "<p style='color:#666'>(no client logs)</p>"
+    )
+    return (
+        "<div style='font-family:sans-serif'>"
+        "<table style='border-collapse:collapse;font-size:14px'>"
+        + "".join(rows) + "</table>"
+        + "<h3 style='font-size:14px;margin-top:18px;margin-bottom:6px'>Description</h3>"
+        + f"<pre style='font-family:monospace;white-space:pre-wrap'>{html_escape(b.get('description', '(none)'))}</pre>"
+        + "<h3 style='font-size:14px;margin-top:18px;margin-bottom:6px'>Recent client logs</h3>"
+        + log_table
+        + "</div>"
+    )
+
+
 def send_confirmation_email(
     *,
     smtp_user: str,

@@ -237,6 +237,28 @@
     </div>
   </template>
 
+  <button type="button" id="bug-fab" hidden title="Report a bug">!</button>
+
+  <template id="bug-modal">
+    <div class="modal-backdrop">
+      <section class="card modal">
+        <h2>Report a bug</h2>
+        <p class="hint">Describe what you were doing and what went wrong. We'll include your email, current view, and recent client errors automatically.</p>
+        <form id="bug-form">
+          <label>
+            What happened?
+            <textarea name="description" rows="6" required placeholder="I clicked Save and nothing happened…"></textarea>
+          </label>
+          <footer class="edit-footer">
+            <button type="submit" class="primary">Send</button>
+            <button type="button" id="bug-cancel">Cancel</button>
+          </footer>
+        </form>
+        <p class="error" id="bug-error" hidden></p>
+      </section>
+    </div>
+  </template>
+
   <div id="toast" hidden></div>
 
   <script type="module" src="./app.js"></script>

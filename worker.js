@@ -36,6 +36,11 @@ export default {
     const pendingMatch = pathname.match(/^\/api\/internal\/pending\/([a-z0-9-]{1,128})$/);
     if (pendingMatch && method === "DELETE") return handleInternalPendingDelete(request, env, pendingMatch[1]);
 
+    if (pathname === "/api/bug-report" && method === "POST") return handleBugReport(request, env);
+    if (pathname === "/api/internal/bugs" && method === "GET") return handleInternalBugs(request, env);
+    const bugMatch = pathname.match(/^\/api\/internal\/bugs\/([a-z0-9-]{1,128})$/);
+    if (bugMatch && method === "DELETE") return handleInternalBugDelete(request, env, bugMatch[1]);
+
     if (pathname === "/api/admin/emails" && method === "GET") return handleAdminListEmails(request, env);
     if (pathname === "/api/admin/emails" && method === "PUT") return handleAdminPutEmails(request, env);
 
@@ -382,6 +387,53 @@ function checkRunnerSecret(request, env) {
   const auth = request.headers.get("Authorization") || "";
   const provided = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   return Boolean(env.RUNNER_SECRET) && constantTimeEqStr(provided, env.RUNNER_SECRET);
+}
+
+async function handleBugReport(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const body = await safeJson(request);
+  const description = typeof body?.description === "string" ? body.description.trim() : "";
+  if (!description) return json({ error: "description required" }, 400);
+  // Cap field sizes so a malicious payload can't blow up KV. KV values can
+  // be up to 25 MiB but we don't need anything close to that.
+  const trim = (s, n) => typeof s === "string" ? s.slice(0, n) : "";
+  const id = `${Date.now().toString(36)}-${randomIdSuffix()}`;
+  const record = {
+    id,
+    email: session.email,
+    description: trim(description, 8000),
+    view: trim(body?.view, 200),
+    user_agent: trim(body?.user_agent, 400),
+    url: trim(body?.url, 500),
+    logs: Array.isArray(body?.logs) ? body.logs.slice(-100) : [],
+    ts: new Date().toISOString(),
+  };
+  await env.SNAPSHOT_KV.put(`bug:${id}`, JSON.stringify(record));
+  return json({ id }, 201);
+}
+
+async function handleInternalBugs(request, env) {
+  if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.SNAPSHOT_KV.list({ prefix: "bug:", cursor });
+    const values = await Promise.all(page.keys.map(k => env.SNAPSHOT_KV.get(k.name)));
+    for (let i = 0; i < page.keys.length; i++) {
+      const v = values[i];
+      if (!v) continue;
+      try { out.push({ key: page.keys[i].name, ...JSON.parse(v) }); } catch { /* skip */ }
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return json(out);
+}
+
+async function handleInternalBugDelete(request, env, id) {
+  if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  await env.SNAPSHOT_KV.delete(`bug:${id}`);
+  return new Response(null, { status: 204 });
 }
 
 async function stampPendingConfirmation(env, action, email, configId) {
