@@ -3,10 +3,6 @@
 // When new SD City Golf courses come online (e.g. Mission Bay), add them
 // here. The UI and any auto-completion logic both read from this file.
 
-export const REPO_OWNER = "joshcharest";
-export const REPO_NAME = "sdgolf-monitor";
-export const REPO_BRANCH = "main";
-
 export const TEESHEETS = [
   { id: 1470, label: "Balboa Park 18" },
   { id: 1490, label: "Balboa Park 9" },
@@ -33,9 +29,3 @@ export const BOOKING_CLASSES = [
   { id: 51736, label: "51736 — Resident 8-90 day window (alternate, matches 51735)" },
   { id: 49924, label: "49924 — Special / promo (no current entitlements)" },
 ];
-
-// Display the date string the way the YAML stores it.
-export function fmtDate(s) {
-  if (!s) return "?";
-  return s;
-}

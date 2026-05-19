@@ -11,7 +11,6 @@
     rel="stylesheet"
   />
   <link rel="stylesheet" href="./style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 </head>
 <body>
   <header>
@@ -28,6 +27,7 @@
     </div>
     <nav>
       <button id="new-btn" type="button" hidden>New check set</button>
+      <span id="user-badge" class="user-badge" hidden></span>
       <button id="signout-btn" type="button" hidden>Sign out</button>
     </nav>
   </header>
@@ -39,30 +39,35 @@
 
   <template id="auth-view">
     <section class="card auth">
-      <h2>One-time setup</h2>
-      <p>
-        This page reads and writes
-        <code>configs/*.yaml</code> in
-        <a href="https://github.com/joshcharest/sdgolf-monitor" target="_blank" rel="noopener">joshcharest/sdgolf-monitor</a>
-        directly through the GitHub REST API. Paste a fine-grained personal
-        access token below. It's stored in this browser's localStorage and
-        never sent anywhere except <code>api.github.com</code>.
-      </p>
-      <ol>
-        <li>
-          Visit
-          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">
-            github.com/settings/personal-access-tokens/new
-          </a>
-        </li>
-        <li>Resource owner: <strong>joshcharest</strong>. Repository access: only <strong>sdgolf-monitor</strong>.</li>
-        <li>Repository permissions: <strong>Contents → Read &amp; write</strong>. Nothing else.</li>
-        <li>Generate, copy the <code>github_pat_…</code> token, paste here.</li>
-      </ol>
-      <form id="auth-form">
-        <input type="password" id="pat-input" placeholder="github_pat_…" autocomplete="off" required />
-        <button type="submit">Save token</button>
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" data-tab="login">Log in</button>
+        <button type="button" class="auth-tab" data-tab="signup">Sign up</button>
+      </div>
+
+      <form id="login-form" class="auth-form">
+        <label>Email
+          <input type="email" name="email" autocomplete="email" required />
+        </label>
+        <label>Password
+          <input type="password" name="password" autocomplete="current-password" required />
+        </label>
+        <button type="submit" class="primary">Log in</button>
       </form>
+
+      <form id="signup-form" class="auth-form" hidden>
+        <p class="hint">An invite code is needed to create an account. Ask whoever shared this URL with you.</p>
+        <label>Email
+          <input type="email" name="email" autocomplete="email" required />
+        </label>
+        <label>Password <small>(at least 8 characters)</small>
+          <input type="password" name="password" autocomplete="new-password" minlength="8" required />
+        </label>
+        <label>Invite code
+          <input type="text" name="invite_code" autocomplete="off" required />
+        </label>
+        <button type="submit" class="primary">Create account</button>
+      </form>
+
       <p class="error" id="auth-error" hidden></p>
     </section>
   </template>
@@ -80,13 +85,14 @@
       <header>
         <h3 class="card-name"></h3>
         <span class="card-matches-summary"></span>
-        <button type="button" class="edit-btn">Edit</button>
-        <label class="toggle">
+        <button type="button" class="edit-btn" hidden>Edit</button>
+        <button type="button" class="subscribe-btn" hidden></button>
+        <label class="toggle" hidden>
           <input type="checkbox" class="enabled-toggle" />
           <span></span>
         </label>
       </header>
-      <p class="card-desc"></p>
+      <p class="card-owner"></p>
       <ul class="card-meta">
         <li class="card-targets"></li>
         <li class="card-dates"></li>
