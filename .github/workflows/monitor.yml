@@ -42,7 +42,8 @@ jobs:
           SDGOLF_PASSWORD: ${{ secrets.SDGOLF_PASSWORD }}
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          WORKER_URL: https://sdgolf-monitor.joshcharest1.workers.dev
+          RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
         run: python -m sdgolf_monitor.main --snapshot-path snapshot.json
 
       - name: Save state cache

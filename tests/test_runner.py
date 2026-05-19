@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from sdgolf_monitor import main as main_mod
 from sdgolf_monitor import runner
@@ -43,8 +42,12 @@ class StubClient:
         ]
 
 
-def _config(targets, *, holes=18, enabled=True):
+def _config(name, targets, *, holes=18, enabled=True, owner="owner@example.com"):
     return {
+        "id": name,
+        "name": name,
+        "owner": owner,
+        "subscribers": [],
         "enabled": enabled,
         "targets": [
             {"name": n, "teesheet_id": 1470, "booking_class": 929} for n in targets
@@ -53,27 +56,22 @@ def _config(targets, *, holes=18, enabled=True):
         "filter": {
             "holes": holes,
             "min_players": 1,
-            "max_green_fee": None,
             "windows": [{"start": "00:00", "end": "23:59"}],
         },
     }
 
 
-def _write_config(d: Path, name: str, cfg: dict) -> None:
-    (d / f"{name}.yaml").write_text(yaml.safe_dump(cfg))
-
-
 def test_disabled_config_is_skipped(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="sdgolf")
-    cfg_dir = tmp_path / "configs"
-    cfg_dir.mkdir()
-    _write_config(cfg_dir, "disabled-set", _config(["A"], enabled=False))
-
     monkeypatch.setenv("SDGOLF_USERNAME", "x")
     monkeypatch.setenv("SDGOLF_PASSWORD", "x")
     monkeypatch.setattr(main_mod, "ForeUpClient", StubClient)
 
-    main_mod.main(cfg_dir, tmp_path / "state", dry_run=True)
+    main_mod.main(
+        tmp_path / "state",
+        configs=[_config("disabled-set", ["A"], enabled=False)],
+        dry_run=True,
+    )
     assert "[disabled-set] disabled, skipping" in caplog.text
     # No state file written for a disabled set
     assert not (tmp_path / "state" / "disabled-set.json").exists()
@@ -81,18 +79,17 @@ def test_disabled_config_is_skipped(tmp_path, monkeypatch, caplog):
 
 def test_exception_in_one_set_doesnt_kill_others(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="sdgolf")
-    cfg_dir = tmp_path / "configs"
-    cfg_dir.mkdir()
-    _write_config(cfg_dir, "a-good", _config(["A"]))
     # Malformed config (filter missing) — will raise during run_check_set
-    (cfg_dir / "b-broken.yaml").write_text("enabled: true\ntargets: []\n")
-    _write_config(cfg_dir, "c-good", _config(["C"]))
-
+    broken = {"id": "b-broken", "name": "b-broken", "owner": "x@y", "enabled": True, "targets": []}
     monkeypatch.setenv("SDGOLF_USERNAME", "x")
     monkeypatch.setenv("SDGOLF_PASSWORD", "x")
     monkeypatch.setattr(main_mod, "ForeUpClient", StubClient)
 
-    main_mod.main(cfg_dir, tmp_path / "state", dry_run=True)
+    main_mod.main(
+        tmp_path / "state",
+        configs=[_config("a-good", ["A"]), broken, _config("c-good", ["C"])],
+        dry_run=True,
+    )
 
     text = caplog.text
     # The broken set raised, was caught, and logged
@@ -108,7 +105,7 @@ def test_per_set_state_files_are_isolated(tmp_path, monkeypatch):
     """Two sets seeing the same time slot keep independent dedup state."""
     state_dir = tmp_path / "state"
     state_dir.mkdir()
-    cfg = _config(["A"])
+    cfg = _config("alpha", ["A"], owner="owner@example.com")
 
     # Stub the email sender — we're testing state isolation, not delivery
     sent: list[dict] = []
@@ -116,7 +113,7 @@ def test_per_set_state_files_are_isolated(tmp_path, monkeypatch):
 
     rows = [{"date": "2026-06-01", "time": "08:00"}]
     client = StubClient(by_target={"A": rows})
-    smtp = runner.SmtpCreds(user="u", password="p", to_addr="x@y")
+    smtp = runner.SmtpCreds(user="u", password="p")
 
     # Alpha runs dry — finds the slot, "would email", returns without saving
     runner.run_check_set(
@@ -135,6 +132,7 @@ def test_per_set_state_files_are_isolated(tmp_path, monkeypatch):
     # Alpha's file was never created — state lives per-set, not shared
     assert not (state_dir / "alpha.json").exists()
     assert len(sent) == 1 and sent[0]["set_name"] == "beta"
+    assert sent[0]["to_addrs"] == ["owner@example.com"]
 
 
 def test_set_name_appears_in_dry_run_subject(tmp_path, caplog):
@@ -144,7 +142,7 @@ def test_set_name_appears_in_dry_run_subject(tmp_path, caplog):
 
     rows = [{"date": "2026-06-01", "time": "08:00"}]
     client = StubClient(by_target={"A": rows})
-    cfg = _config(["A"])
+    cfg = _config("my-special-set", ["A"])
 
     runner.run_check_set(
         client=client, cfg=cfg, state_path=state_path,
@@ -156,21 +154,16 @@ def test_set_name_appears_in_dry_run_subject(tmp_path, caplog):
 
 def test_no_configs_returns_zero(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.WARNING, logger="sdgolf")
-    cfg_dir = tmp_path / "configs"
-    cfg_dir.mkdir()
     monkeypatch.setenv("SDGOLF_USERNAME", "x")
     monkeypatch.setenv("SDGOLF_PASSWORD", "x")
-    rc = main_mod.main(cfg_dir, tmp_path / "state", dry_run=True)
+    rc = main_mod.main(tmp_path / "state", configs=[], dry_run=True)
     assert rc == 0
-    assert "no check sets found" in caplog.text
+    assert "no check sets returned" in caplog.text
 
 
 def test_snapshot_records_matches_disabled_and_errors(tmp_path, monkeypatch):
-    cfg_dir = tmp_path / "configs"
-    cfg_dir.mkdir()
-    _write_config(cfg_dir, "ok-set", _config(["A"]))
-    _write_config(cfg_dir, "disabled-set", _config(["B"], enabled=False))
-    (cfg_dir / "broken-set.yaml").write_text("enabled: true\ntargets: []\n")
+    broken = {"id": "broken-set", "name": "broken-set", "owner": "x@y", "enabled": True, "targets": []}
+    configs = [_config("ok-set", ["A"]), _config("disabled-set", ["B"], enabled=False), broken]
 
     rows = [{"date": "2026-06-01", "time": "08:00"}]
     stub = StubClient(by_target={"A": rows})
@@ -179,12 +172,14 @@ def test_snapshot_records_matches_disabled_and_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(main_mod, "ForeUpClient", lambda: stub)
 
     snap_path = tmp_path / "snapshot.json"
-    main_mod.main(cfg_dir, tmp_path / "state", dry_run=True, snapshot_path=snap_path)
+    main_mod.main(tmp_path / "state", configs=configs, dry_run=True, snapshot_path=snap_path)
     payload = json.loads(snap_path.read_text())
 
     assert "generated_at" in payload
     sets = payload["sets"]
     assert sets["ok-set"]["enabled"] is True
+    assert sets["ok-set"]["name"] == "ok-set"
+    assert sets["ok-set"]["owner"] == "owner@example.com"
     assert len(sets["ok-set"]["matches"]) == 1
     assert sets["ok-set"]["matches"][0]["target"] == "A"
     assert sets["disabled-set"]["enabled"] is False

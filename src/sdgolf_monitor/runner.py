@@ -22,7 +22,6 @@ log = logging.getLogger("sdgolf")
 class SmtpCreds:
     user: str
     password: str
-    to_addr: str
 
 
 def run_check_set(
@@ -102,12 +101,31 @@ def run_check_set(
 
     if smtp is None:
         raise RuntimeError("smtp creds required for non-dry-run with new matches")
-    notify.send_email(
-        smtp_user=smtp.user,
-        smtp_password=smtp.password,
-        to_addr=smtp.to_addr,
-        set_name=set_name,
-        new_times=new,
-    )
+    recipients = _recipients(cfg)
+    if not recipients:
+        log.warning("[%s] no recipients (no owner/subscribers); skipping email", set_name)
+    else:
+        notify.send_email(
+            smtp_user=smtp.user,
+            smtp_password=smtp.password,
+            to_addrs=recipients,
+            set_name=set_name,
+            new_times=new,
+        )
     state.save(state_path, seen)
     return matches
+
+
+def _recipients(cfg: dict[str, Any]) -> list[str]:
+    """Owner + de-duped subscribers, dropping blanks. Order: owner first."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for addr in [cfg.get("owner"), *(cfg.get("subscribers") or [])]:
+        if not isinstance(addr, str):
+            continue
+        a = addr.strip().lower()
+        if not a or a in seen:
+            continue
+        seen.add(a)
+        out.append(a)
+    return out

@@ -13,29 +13,31 @@ def send_email(
     *,
     smtp_user: str,
     smtp_password: str,
-    to_addr: str,
+    to_addrs: list[str],
     set_name: str,
     new_times: list[TeeTime],
 ) -> None:
     """Send a digest email for one check set's new matches.
 
     The ``set_name`` is tagged into the subject so Gmail filters can route each
-    check set's notifications independently.
+    check set's notifications independently. ``to_addrs`` is a list because each
+    check set has an owner plus optional subscribers; they all get the same
+    digest in one send.
 
     Raises smtplib.SMTPException on transport failure.
     """
-    if not new_times:
+    if not new_times or not to_addrs:
         return
     msg = EmailMessage()
     msg["From"] = smtp_user
-    msg["To"] = to_addr
+    msg["To"] = ", ".join(to_addrs)
     msg["Subject"] = _subject(set_name, new_times)
     msg.set_content(_plaintext(new_times))
     msg.add_alternative(_html(new_times), subtype="html")
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
         smtp.login(smtp_user, smtp_password)
-        smtp.send_message(msg)
+        smtp.send_message(msg, to_addrs=to_addrs)
 
 
 def _subject(set_name: str, new_times: list[TeeTime]) -> str:
