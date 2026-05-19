@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import re
-import secrets
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,7 +60,11 @@ def main() -> int:
     for path in sorted(config_dir.glob("*.yaml")):
         cfg = yaml.safe_load(path.read_text())
         name = path.stem
-        config_id = f"{slugify(name)}-{secrets.token_hex(2)}"
+        # Deterministic id (slug only, no random suffix) so re-running this
+        # script is idempotent — it overwrites the existing KV entry in place
+        # instead of creating a duplicate. UI-created configs use slug-<hex>
+        # so they never collide with these migration ids.
+        config_id = slugify(name)
         record = {
             "id": config_id,
             "name": name,
