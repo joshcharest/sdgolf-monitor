@@ -55,15 +55,12 @@
       </form>
 
       <form id="signup-form" class="auth-form" hidden>
-        <p class="hint">An invite code is needed to create an account. Ask whoever shared this URL with you.</p>
+        <p class="hint">You can only sign up with an email the admin has added to the allow list. Ask whoever shared this URL if your email isn't accepted.</p>
         <label>Email
           <input type="email" name="email" autocomplete="email" required />
         </label>
         <label>Password <small>(at least 8 characters)</small>
           <input type="password" name="password" autocomplete="new-password" minlength="8" required />
-        </label>
-        <label>Invite code
-          <input type="text" name="invite_code" autocomplete="off" required />
         </label>
         <button type="submit" class="primary">Create account</button>
       </form>

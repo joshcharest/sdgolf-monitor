@@ -51,7 +51,7 @@ async function api(method, path, body) {
 
 const apiMe        = ()                  => api("GET",    "/api/me");
 const apiLogin     = (email, password)   => api("POST",   "/api/auth/login",  { email, password });
-const apiSignup    = (email, password, c) => api("POST",  "/api/auth/signup", { email, password, invite_code: c });
+const apiSignup    = (email, password)   => api("POST",   "/api/auth/signup", { email, password });
 const apiLogout    = ()                  => api("POST",   "/api/auth/logout");
 const apiListConfigs   = ()              => api("GET",    "/api/configs");
 const apiCreateConfig  = (cfg)           => api("POST",   "/api/configs", cfg);
@@ -124,7 +124,6 @@ function renderAuth() {
       const r = await apiSignup(
         fd.get("email").trim().toLowerCase(),
         fd.get("password"),
-        fd.get("invite_code").trim(),
       );
       USER = r;
       toast(`Welcome, ${r.email}`);
