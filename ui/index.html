@@ -26,7 +26,7 @@
       </div>
     </div>
     <nav>
-      <button id="new-btn" type="button" hidden>New check set</button>
+      <button id="new-btn" type="button" hidden>New subscription</button>
       <span id="user-badge" class="user-badge" hidden></span>
       <button id="signout-btn" type="button" hidden>Sign out</button>
     </nav>
@@ -74,8 +74,12 @@
 
   <template id="list-view">
     <section id="list-section">
+      <div class="list-tabs">
+        <button type="button" class="list-tab active" data-filter="mine">My subscriptions</button>
+        <button type="button" class="list-tab" data-filter="others">Other subscriptions</button>
+      </div>
       <div class="cards" id="cards"></div>
-      <p class="hint" id="cards-empty" hidden>No check sets yet — click "＋ New check set" to create one.</p>
+      <p class="hint" id="cards-empty" hidden></p>
       <p class="snapshot-meta" id="snapshot-meta"></p>
     </section>
   </template>

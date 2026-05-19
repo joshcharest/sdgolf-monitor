@@ -842,12 +842,15 @@ form .hint code {
 .card.auth p a { color: var(--link); }
 .card.auth p a:hover { color: var(--accent); }
 
-.auth-tabs {
+.auth-tabs,
+.list-tabs {
   display: flex; gap: 4px;
   margin: 0 0 18px;
   border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
 }
-.auth-tab {
+.auth-tab,
+.list-tab {
   background: transparent;
   border: 1px solid transparent;
   border-bottom: none;
@@ -861,11 +864,12 @@ form .hint code {
   margin-bottom: -1px;
   border-radius: var(--radius) var(--radius) 0 0;
 }
-.auth-tab:hover { color: var(--text-dim); background: transparent; }
-.auth-tab.active {
-  color: var(--accent);
-  border-color: var(--border);
-  background: var(--panel);
+.auth-tab:hover,
+.list-tab:hover { color: var(--text-dim); background: transparent; }
+.auth-tab.active { color: var(--accent); border-color: var(--border); background: var(--panel); }
+.list-tab.active { color: var(--accent); border-color: var(--border); background: var(--bg); }
+@media (max-width: 480px) {
+  .list-tab { font-size: 13px; padding: 8px 12px; }
 }
 
 .auth-form { display: flex; flex-direction: column; gap: 6px; }
