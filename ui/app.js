@@ -89,6 +89,8 @@ const apiSubscribe     = (id)            => api("POST",   `/api/configs/${id}/su
 const apiUnsubscribe   = (id)            => api("POST",   `/api/configs/${id}/unsubscribe`);
 const apiAdminGetEmails = ()             => api("GET",    "/api/admin/emails");
 const apiAdminPutEmails = (emails)       => api("PUT",    "/api/admin/emails", { emails });
+const apiAdminGetUsers  = ()             => api("GET",    "/api/admin/users");
+const apiAdminResetUser = (email)        => api("DELETE", `/api/admin/users/${encodeURIComponent(email)}`);
 const apiBugReport      = (payload)      => api("POST",   "/api/bug-report", payload);
 
 // Fire-and-forget: tell the Worker to dispatch the monitor workflow right
@@ -843,6 +845,7 @@ async function renderAdmin() {
         parts.push(`${removed.length} signed out: ${removed.join(", ")}`);
       }
       toast(parts.join(" — "));
+      await renderAdminUsers();
     } catch (e2) {
       err.textContent = `Save failed: ${e2.message}`;
       err.hidden = false;
@@ -851,6 +854,56 @@ async function renderAdmin() {
       submitBtn.textContent = "Save";
     }
   });
+
+  await renderAdminUsers();
+}
+
+async function renderAdminUsers() {
+  const list = document.getElementById("admin-users-list");
+  const empty = document.getElementById("admin-users-empty");
+  if (!list) return;
+  list.innerHTML = "";
+  let users;
+  try {
+    ({ emails: users } = await apiAdminGetUsers());
+  } catch (e) {
+    list.innerHTML = `<li class="error">Failed to load accounts: ${e.message}</li>`;
+    empty.hidden = true;
+    return;
+  }
+  if (users.length === 0) {
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+  for (const email of users) {
+    const li = document.createElement("li");
+    li.className = "admin-user-row";
+    const span = document.createElement("span");
+    span.className = "admin-user-email";
+    span.textContent = email;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "danger";
+    btn.textContent = "Reset password";
+    btn.addEventListener("click", async () => {
+      if (!confirm(`Reset password for ${email}? They'll need to sign up again to set a new one.`)) return;
+      btn.disabled = true;
+      btn.textContent = "Resetting…";
+      try {
+        await apiAdminResetUser(email);
+        toast(`Reset ${email}`);
+        await renderAdminUsers();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "Reset password";
+        toast(`Failed: ${e.message}`, "error");
+      }
+    });
+    li.appendChild(span);
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
 }
 
 // ----- Bug-report modal --------------------------------------------------

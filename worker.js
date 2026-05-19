@@ -43,6 +43,9 @@ export default {
 
     if (pathname === "/api/admin/emails" && method === "GET") return handleAdminListEmails(request, env);
     if (pathname === "/api/admin/emails" && method === "PUT") return handleAdminPutEmails(request, env);
+    if (pathname === "/api/admin/users"  && method === "GET") return handleAdminListUsers(request, env);
+    const userResetMatch = pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+    if (userResetMatch && method === "DELETE") return handleAdminResetUser(request, env, decodeURIComponent(userResetMatch[1]));
 
     if (pathname === "/api/configs" && method === "GET")  return handleListConfigs(request, env);
     if (pathname === "/api/configs" && method === "POST") return handleCreateConfig(request, env);
@@ -209,6 +212,29 @@ async function handleAdminPutEmails(request, env) {
 
   await env.SNAPSHOT_KV.put("allowed_emails", JSON.stringify(final));
   return json({ emails: final, removed });
+}
+
+async function handleAdminListUsers(request, env) {
+  const session = await requireAdmin(request, env);
+  if (session instanceof Response) return session;
+  const emails = [];
+  let cursor;
+  do {
+    const page = await env.SNAPSHOT_KV.list({ prefix: "user:", cursor });
+    for (const k of page.keys) emails.push(k.name.slice("user:".length));
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  emails.sort();
+  return json({ emails });
+}
+
+async function handleAdminResetUser(request, env, email) {
+  const session = await requireAdmin(request, env);
+  if (session instanceof Response) return session;
+  const normalised = normaliseEmail(email);
+  if (!normalised) return json({ error: "email required" }, 400);
+  await env.SNAPSHOT_KV.delete(`user:${normalised}`);
+  return new Response(null, { status: 204 });
 }
 
 async function handleLogin(request, env) {
