@@ -818,15 +818,19 @@ form .hint code {
 }
 .back-link:hover { text-decoration: underline; }
 
-.accounts-heading {
-  margin-top: 32px;
-  padding-top: 22px;
-  border-top: 1px solid var(--border-soft);
+.admin-add {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 18px;
+}
+.admin-add input {
+  flex: 1;
+  min-width: 0;
 }
 
 .admin-users {
   list-style: none;
-  margin: 12px 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -844,11 +848,54 @@ form .hint code {
   border-radius: var(--radius);
 }
 
+.admin-user-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
 .admin-user-email {
   font-family: var(--font-mono);
   font-size: 14px;
   overflow-wrap: anywhere;
   min-width: 0;
+}
+
+.admin-user-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-user-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  background: rgba(0, 0, 0, 0.15);
+}
+.badge-account { color: var(--accent); border-color: var(--accent-deep); }
+.badge-pending { color: var(--text-muted); }
+.badge-orphan  { color: var(--danger); border-color: var(--danger); }
+.badge-you     { color: var(--text); border-color: var(--text-muted); }
+
+@media (max-width: 480px) {
+  .admin-user-row { flex-direction: column; align-items: stretch; }
+  .admin-user-actions { justify-content: flex-start; }
 }
 
 .error {

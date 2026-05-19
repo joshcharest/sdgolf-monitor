@@ -198,23 +198,17 @@
     <section class="card edit">
       <button type="button" id="admin-back" class="back-link">← Back to subscriptions</button>
 
-      <h2>Allowed sign-up emails</h2>
-      <p class="hint">One email per line. Only people on this list can create accounts. Existing accounts aren't affected if you remove an email — they stay signed in until they log out.</p>
-      <form id="admin-form">
-        <label>
-          Emails
-          <textarea name="emails" rows="10" placeholder="alice@example.com&#10;bob@example.com" autocomplete="off"></textarea>
-        </label>
-        <footer class="edit-footer">
-          <button type="submit" class="primary">Save</button>
-        </footer>
-      </form>
-      <p class="error" id="admin-error" hidden></p>
+      <h2>Allowed users</h2>
+      <p class="hint">Only emails on this list can create accounts. <strong>Account</strong> means they've signed up and set a password. Reset deletes the account so they sign up again; Remove drops them from the allowlist and signs them out.</p>
 
-      <h2 class="accounts-heading">Accounts</h2>
-      <p class="hint">These users have signed up and set a password. Resetting deletes their account so they sign up again with a new password.</p>
+      <form id="admin-add-form" class="admin-add">
+        <input type="email" name="email" placeholder="alice@example.com" autocomplete="off" required />
+        <button type="submit" class="primary">Add</button>
+      </form>
+
       <ul id="admin-users-list" class="admin-users"></ul>
-      <p class="hint" id="admin-users-empty" hidden>No accounts yet.</p>
+      <p class="hint" id="admin-users-empty" hidden>No allowed users yet.</p>
+      <p class="error" id="admin-error" hidden></p>
     </section>
   </template>
 
