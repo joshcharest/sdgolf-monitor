@@ -474,8 +474,10 @@ function hasAdvancedBookingFee(m) {
   }
   const [y, mo, d] = m.date.split("-").map(Number);
   const slot = Date.UTC(y, mo - 1, d);
+  // Use the browser's local date (course-local Pacific time) for "today" so
+  // the 8-day cutoff doesn't shift at midnight UTC (which is 4-5 PM Pacific).
   const today = new Date();
-  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   const days = Math.round((slot - todayUtc) / 86400000);
   return days >= 8;
 }
