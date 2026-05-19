@@ -50,6 +50,9 @@ export default {
     if (pathname === "/api/configs" && method === "GET")  return handleListConfigs(request, env);
     if (pathname === "/api/configs" && method === "POST") return handleCreateConfig(request, env);
 
+    if (pathname === "/api/unsubscribe" && method === "GET")  return handleUnsubscribeGet(request, env);
+    if (pathname === "/api/unsubscribe" && method === "POST") return handleUnsubscribePost(request, env);
+
     const configMatch = pathname.match(/^\/api\/configs\/([a-z0-9-]{1,128})(?:\/(subscribe|unsubscribe))?$/);
     if (configMatch) {
       const [, id, action] = configMatch;
@@ -326,6 +329,7 @@ async function handleCreateConfig(request, env) {
     updated_at: now,
   });
   await env.SNAPSHOT_KV.put(`config:${id}`, JSON.stringify(config));
+  await indexAdd(env, "configs_index", "config:", id);
   await stampPendingConfirmation(env, "create", session.email, id);
   return json(config, 201);
 }
@@ -357,6 +361,7 @@ async function handleDeleteConfig(request, env, id) {
   if (!existing) return json({ error: "not found" }, 404);
   if (existing.owner !== session.email) return json({ error: "forbidden" }, 403);
   await env.SNAPSHOT_KV.delete(`config:${id}`);
+  await indexRemove(env, "configs_index", "config:", id);
   return new Response(null, { status: 204 });
 }
 
@@ -380,6 +385,136 @@ async function handleSubscribe(request, env, id, subscribing) {
   return json(existing);
 }
 
+// Email unsubscribe split into GET (confirm page, no side effect) and POST
+// (actually unsubscribes). Splitting matters because some email clients and
+// corporate link scanners (Outlook Safe Links, antivirus prefetchers) issue
+// GETs against URLs in messages to scan them for malware — a GET-driven
+// unsubscribe would let those scanners silently opt people out. The
+// confirmation page submits a POST so a real human has to click.
+//
+// The List-Unsubscribe-Post header in the email tells Gmail / Apple Mail
+// the URL accepts a one-click POST directly, so users hitting the client's
+// built-in Unsubscribe button never see the confirm page. (RFC 8058.)
+async function handleUnsubscribeGet(request, env) {
+  const url = new URL(request.url);
+  const token = url.searchParams.get("t") || "";
+  if (!env.RUNNER_SECRET) return unsubPage("Unsubscribe is not configured on this deployment.", 503);
+  const payload = await verifyUnsubscribeToken(token, env.RUNNER_SECRET);
+  if (!payload) return unsubPage("This unsubscribe link is invalid or has expired.", 400);
+
+  const cfg = await readConfig(env, payload.config_id);
+  if (!cfg) return unsubPage("This check set no longer exists — nothing to unsubscribe from.", 404);
+
+  if (payload.email === cfg.owner) {
+    return unsubPage(
+      `You own <strong>${escapeHtml(cfg.name)}</strong>, so you receive its emails automatically. ` +
+      `To stop them, sign in and delete the check set.`,
+      200,
+    );
+  }
+  return unsubConfirmPage(token, payload.email, cfg.name);
+}
+
+async function handleUnsubscribePost(request, env) {
+  const url = new URL(request.url);
+  // Token can come from the query string (header-driven one-click) or the
+  // form body (confirm-page submit). Accept either.
+  let token = url.searchParams.get("t") || "";
+  if (!token) {
+    const ct = request.headers.get("content-type") || "";
+    if (ct.includes("application/x-www-form-urlencoded")) {
+      try {
+        const form = await request.formData();
+        token = String(form.get("t") || "");
+      } catch { /* ignore */ }
+    }
+  }
+  if (!env.RUNNER_SECRET) return unsubPage("Unsubscribe is not configured on this deployment.", 503);
+  const payload = await verifyUnsubscribeToken(token, env.RUNNER_SECRET);
+  if (!payload) return unsubPage("This unsubscribe link is invalid or has expired.", 400);
+
+  const cfg = await readConfig(env, payload.config_id);
+  if (!cfg) return unsubPage("This check set no longer exists — nothing to unsubscribe from.", 404);
+
+  if (payload.email === cfg.owner) {
+    return unsubPage(
+      `You own <strong>${escapeHtml(cfg.name)}</strong>, so you receive its emails automatically. ` +
+      `To stop them, sign in and delete the check set.`,
+      200,
+    );
+  }
+  const subs = new Set(cfg.subscribers || []);
+  if (subs.delete(payload.email)) {
+    cfg.subscribers = [...subs];
+    cfg.updated_at = new Date().toISOString();
+    await env.SNAPSHOT_KV.put(`config:${cfg.id}`, JSON.stringify(cfg));
+  }
+  return unsubPage(
+    `Unsubscribed <strong>${escapeHtml(payload.email)}</strong> from <strong>${escapeHtml(cfg.name)}</strong>. ` +
+    `You will no longer receive new-tee-time emails for this check set.`,
+    200,
+  );
+}
+
+function unsubConfirmPage(token, email, setName) {
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Unsubscribe — sdgolf</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 520px; margin: 80px auto; padding: 0 20px; color: #222; line-height: 1.5; }
+  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 28px; }
+  a { color: #1565c0; }
+  h1 { font-size: 18px; margin: 0 0 12px 0; }
+  button { background: #1565c0; color: #fff; border: 0; padding: 10px 20px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  button:hover { background: #0d47a1; }
+</style></head>
+<body><div class="card">
+  <h1>sdgolf</h1>
+  <p>Unsubscribe <strong>${escapeHtml(email)}</strong> from <strong>${escapeHtml(setName)}</strong>?</p>
+  <form method="POST" action="/api/unsubscribe">
+    <input type="hidden" name="t" value="${escapeHtml(token)}">
+    <button type="submit">Unsubscribe</button>
+  </form>
+  <p><a href="/">Back to sdgolf</a></p>
+</div></body></html>`;
+  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
+
+async function verifyUnsubscribeToken(token, secret) {
+  const dot = token.lastIndexOf(".");
+  if (dot < 0) return null;
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = await hmacSha256(secret, body);
+  if (!constantTimeEqStr(sig, expected)) return null;
+  let payload;
+  try { payload = JSON.parse(b64urlDecodeStr(body)); } catch { return null; }
+  if (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) return null;
+  if (typeof payload.email !== "string") return null;
+  if (typeof payload.config_id !== "string") return null;
+  return payload;
+}
+
+function unsubPage(message, status) {
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Unsubscribe — sdgolf</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 520px; margin: 80px auto; padding: 0 20px; color: #222; line-height: 1.5; }
+  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 28px; }
+  a { color: #1565c0; }
+  h1 { font-size: 18px; margin: 0 0 12px 0; }
+</style></head>
+<body><div class="card"><h1>sdgolf</h1><p>${message}</p><p><a href="/">Back to sdgolf</a></p></div></body></html>`;
+  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
 async function handleInternalConfigs(request, env) {
   if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
   const configs = await loadAllConfigs(env);
@@ -388,24 +523,21 @@ async function handleInternalConfigs(request, env) {
 
 async function handleInternalPending(request, env) {
   if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  const ids = await loadIndex(env, "pending_index", "pending:");
+  const values = await Promise.all(ids.map(id => env.SNAPSHOT_KV.get(`pending:${id}`)));
   const out = [];
-  let cursor;
-  do {
-    const page = await env.SNAPSHOT_KV.list({ prefix: "pending:", cursor });
-    const values = await Promise.all(page.keys.map(k => env.SNAPSHOT_KV.get(k.name)));
-    for (let i = 0; i < page.keys.length; i++) {
-      const v = values[i];
-      if (!v) continue;
-      try { out.push({ key: page.keys[i].name, ...JSON.parse(v) }); } catch { /* skip */ }
-    }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
+  for (let i = 0; i < ids.length; i++) {
+    const v = values[i];
+    if (!v) continue;
+    try { out.push({ key: `pending:${ids[i]}`, ...JSON.parse(v) }); } catch { /* skip */ }
+  }
   return json(out);
 }
 
 async function handleInternalPendingDelete(request, env, id) {
   if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
   await env.SNAPSHOT_KV.delete(`pending:${id}`);
+  await indexRemove(env, "pending_index", "pending:", id);
   return new Response(null, { status: 204 });
 }
 
@@ -436,29 +568,27 @@ async function handleBugReport(request, env) {
     ts: new Date().toISOString(),
   };
   await env.SNAPSHOT_KV.put(`bug:${id}`, JSON.stringify(record));
+  await indexAdd(env, "bug_index", "bug:", id);
   return json({ id }, 201);
 }
 
 async function handleInternalBugs(request, env) {
   if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  const ids = await loadIndex(env, "bug_index", "bug:");
+  const values = await Promise.all(ids.map(id => env.SNAPSHOT_KV.get(`bug:${id}`)));
   const out = [];
-  let cursor;
-  do {
-    const page = await env.SNAPSHOT_KV.list({ prefix: "bug:", cursor });
-    const values = await Promise.all(page.keys.map(k => env.SNAPSHOT_KV.get(k.name)));
-    for (let i = 0; i < page.keys.length; i++) {
-      const v = values[i];
-      if (!v) continue;
-      try { out.push({ key: page.keys[i].name, ...JSON.parse(v) }); } catch { /* skip */ }
-    }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
+  for (let i = 0; i < ids.length; i++) {
+    const v = values[i];
+    if (!v) continue;
+    try { out.push({ key: `bug:${ids[i]}`, ...JSON.parse(v) }); } catch { /* skip */ }
+  }
   return json(out);
 }
 
 async function handleInternalBugDelete(request, env, id) {
   if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
   await env.SNAPSHOT_KV.delete(`bug:${id}`);
+  await indexRemove(env, "bug_index", "bug:", id);
   return new Response(null, { status: 204 });
 }
 
@@ -466,6 +596,7 @@ async function stampPendingConfirmation(env, action, email, configId) {
   const id = `${Date.now().toString(36)}-${randomIdSuffix()}`;
   const record = { id, action, email, config_id: configId, ts: new Date().toISOString() };
   await env.SNAPSHOT_KV.put(`pending:${id}`, JSON.stringify(record));
+  await indexAdd(env, "pending_index", "pending:", id);
 }
 
 async function requireSession(request, env) {
@@ -481,16 +612,49 @@ async function readConfig(env, id) {
 }
 
 async function loadAllConfigs(env) {
-  // KV list pagination: 1000 keys per page is plenty for foreseeable use.
+  const ids = await loadIndex(env, "configs_index", "config:");
+  const values = await Promise.all(ids.map(id => env.SNAPSHOT_KV.get(`config:${id}`)));
   const out = [];
+  for (const v of values) if (v) out.push(JSON.parse(v));
+  return out;
+}
+
+// Maintain a JSON index per prefix so reads don't need KV list operations.
+// Lists count against a small daily free-tier quota (1k/day); reads have a
+// huge one (100k). Lazy bootstrap: first read of a missing index does a
+// one-time list to populate it, so this is safe to roll out without a
+// migration script.
+async function loadIndex(env, indexKey, listPrefix) {
+  const cached = await env.SNAPSHOT_KV.get(indexKey);
+  if (cached) {
+    try {
+      const arr = JSON.parse(cached);
+      if (Array.isArray(arr)) return arr;
+    } catch { /* fall through to rebuild */ }
+  }
+  const ids = [];
   let cursor;
   do {
-    const page = await env.SNAPSHOT_KV.list({ prefix: "config:", cursor });
-    const values = await Promise.all(page.keys.map(k => env.SNAPSHOT_KV.get(k.name)));
-    for (const v of values) if (v) out.push(JSON.parse(v));
+    const page = await env.SNAPSHOT_KV.list({ prefix: listPrefix, cursor });
+    for (const k of page.keys) ids.push(k.name.slice(listPrefix.length));
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
-  return out;
+  await env.SNAPSHOT_KV.put(indexKey, JSON.stringify(ids));
+  return ids;
+}
+
+async function indexAdd(env, indexKey, listPrefix, id) {
+  const ids = await loadIndex(env, indexKey, listPrefix);
+  if (ids.includes(id)) return;
+  ids.push(id);
+  await env.SNAPSHOT_KV.put(indexKey, JSON.stringify(ids));
+}
+
+async function indexRemove(env, indexKey, listPrefix, id) {
+  const ids = await loadIndex(env, indexKey, listPrefix);
+  const next = ids.filter(x => x !== id);
+  if (next.length === ids.length) return;
+  await env.SNAPSHOT_KV.put(indexKey, JSON.stringify(next));
 }
 
 function buildConfig(existing, body, overrides) {

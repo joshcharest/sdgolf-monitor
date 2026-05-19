@@ -33,6 +33,8 @@ def run_check_set(
     dry_run: bool,
     smtp: SmtpCreds | None,
     recipients_override: list[str] | None = None,
+    worker_url: str | None = None,
+    unsubscribe_secret: str | None = None,
 ) -> list[TeeTime]:
     """Run one config to completion. Caller handles exception isolation.
 
@@ -112,6 +114,10 @@ def run_check_set(
             to_addrs=recipients,
             set_name=set_name,
             new_times=new,
+            owner=cfg.get("owner"),
+            config_id=cfg.get("id"),
+            worker_url=worker_url,
+            unsubscribe_secret=unsubscribe_secret,
         )
     state.save(state_path, seen)
     return matches
