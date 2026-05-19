@@ -12,11 +12,38 @@ const ADMIN_BTN = document.getElementById("admin-btn");
 const SIGNOUT_BTN = document.getElementById("signout-btn");
 const USER_BADGE = document.getElementById("user-badge");
 const TOAST = document.getElementById("toast");
+const BUG_FAB = document.getElementById("bug-fab");
+
+// Ring buffer of recent client-side log entries (errors, warnings, uncaught
+// exceptions, unhandled promise rejections). Attached to bug reports so we
+// get some forensic context with each submission.
+const LOG_BUFFER = [];
+const LOG_BUFFER_MAX = 100;
+
+function captureLog(level, args) {
+  try {
+    const msg = Array.from(args).map(a => {
+      if (a instanceof Error) return `${a.name}: ${a.message}\n${a.stack || ""}`;
+      if (typeof a === "object") { try { return JSON.stringify(a); } catch { return String(a); } }
+      return String(a);
+    }).join(" ");
+    LOG_BUFFER.push({ ts: new Date().toISOString(), level, msg });
+    if (LOG_BUFFER.length > LOG_BUFFER_MAX) LOG_BUFFER.shift();
+  } catch { /* swallow */ }
+}
+
+const _origError = console.error;
+console.error = function(...args) { captureLog("error", args); _origError.apply(console, args); };
+const _origWarn = console.warn;
+console.warn  = function(...args) { captureLog("warn",  args); _origWarn.apply(console,  args); };
+window.addEventListener("error", (e) => captureLog("uncaught", [e.message, `${e.filename}:${e.lineno}:${e.colno}`]));
+window.addEventListener("unhandledrejection", (e) => captureLog("unhandled-promise", [String(e.reason)]));
 
 // In-memory cache of configs we've loaded this session: id → cfg object
 const CACHE = new Map();
 let USER = null;  // { email } once signed in
 let LIST_FILTER = "mine";  // "mine" | "others" — persists across renderList calls
+let CURRENT_VIEW = "boot";  // updated on each render — included in bug reports
 
 // ----- Toast -------------------------------------------------------------
 
@@ -62,6 +89,7 @@ const apiSubscribe     = (id)            => api("POST",   `/api/configs/${id}/su
 const apiUnsubscribe   = (id)            => api("POST",   `/api/configs/${id}/unsubscribe`);
 const apiAdminGetEmails = ()             => api("GET",    "/api/admin/emails");
 const apiAdminPutEmails = (emails)       => api("PUT",    "/api/admin/emails", { emails });
+const apiBugReport      = (payload)      => api("POST",   "/api/bug-report", payload);
 
 // Fire-and-forget: tell the Worker to dispatch the monitor workflow right
 // now so the snapshot reflects this config mutation within ~30s instead of
@@ -79,12 +107,14 @@ function setNav({ showNew = false } = {}) {
   ADMIN_BTN.hidden = !(USER && USER.is_admin && showNew);
   SIGNOUT_BTN.hidden = !USER;
   USER_BADGE.hidden = !USER;
+  BUG_FAB.hidden = !USER;
   if (USER) USER_BADGE.textContent = USER.email;
 }
 
 function renderAuth() {
   USER = null;
   CACHE.clear();
+  CURRENT_VIEW = "auth";
   ROOT.innerHTML = "";
   const view = document.getElementById("auth-view").content.cloneNode(true);
   ROOT.appendChild(view);
@@ -140,6 +170,7 @@ function renderAuth() {
 }
 
 async function renderList() {
+  CURRENT_VIEW = "list";
   ROOT.innerHTML = "<p class='loading'>Loading subscriptions…</p>";
   setNav({ showNew: true });
 
@@ -546,6 +577,7 @@ function renderEdit(existingId) {
     filter: { holes: 18, min_players: 2, windows: [{ start: "07:00", end: "11:00", weekdays: ["sat", "sun"] }] },
   };
 
+  CURRENT_VIEW = existingId ? `edit:${existingId}` : "edit:new";
   ROOT.innerHTML = "";
   const view = document.getElementById("edit-view").content.cloneNode(true);
   ROOT.appendChild(view);
@@ -768,6 +800,7 @@ function readDateSpec(form, which) {
 
 async function renderAdmin() {
   if (!USER?.is_admin) return renderList();
+  CURRENT_VIEW = "admin";
   ROOT.innerHTML = "<p class='loading'>Loading allowed emails…</p>";
   setNav({ showNew: false });
 
@@ -820,10 +853,56 @@ async function renderAdmin() {
   });
 }
 
+// ----- Bug-report modal --------------------------------------------------
+
+function openBugModal() {
+  if (!USER) return;
+  const node = document.getElementById("bug-modal").content.cloneNode(true);
+  const backdrop = node.querySelector(".modal-backdrop");
+  document.body.appendChild(node);
+  const form = document.getElementById("bug-form");
+  const err = document.getElementById("bug-error");
+  const close = () => backdrop.remove();
+  document.getElementById("bug-cancel").addEventListener("click", close);
+  backdrop.addEventListener("click", (e) => { if (e.target === backdrop) close(); });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.hidden = true;
+    const submitBtn = form.querySelector("button[type=submit]");
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Sending…";
+    const description = form.elements["description"].value.trim();
+    if (!description) {
+      err.textContent = "Description required";
+      err.hidden = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Send";
+      return;
+    }
+    try {
+      await apiBugReport({
+        description,
+        view: CURRENT_VIEW,
+        url: location.href,
+        user_agent: navigator.userAgent,
+        logs: LOG_BUFFER.slice(-50),
+      });
+      close();
+      toast("Bug report sent. Thanks!");
+    } catch (e2) {
+      err.textContent = `Could not send: ${e2.message}`;
+      err.hidden = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Send";
+    }
+  });
+}
+
 // ----- Boot --------------------------------------------------------------
 
 NEW_BTN.addEventListener("click", () => renderEdit(null));
 ADMIN_BTN.addEventListener("click", () => renderAdmin());
+BUG_FAB.addEventListener("click", () => openBugModal());
 SIGNOUT_BTN.addEventListener("click", async () => {
   if (!confirm("Sign out?")) return;
   try { await apiLogout(); } catch { /* ignore */ }

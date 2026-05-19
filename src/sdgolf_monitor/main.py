@@ -35,6 +35,9 @@ def main(
     snapshot_path: Path | None = None,
     pending: list[dict[str, Any]] | None = None,
     pending_consume: "callable[[str], None] | None" = None,
+    bugs: list[dict[str, Any]] | None = None,
+    bug_consume: "callable[[str], None] | None" = None,
+    admin_emails: list[str] | None = None,
 ) -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -147,6 +150,24 @@ def main(
             if pending_consume:
                 pending_consume(p["key"])
 
+    # Process bug reports — email each pending bug to the admin list, then
+    # consume the KV record so we don't re-send.
+    if bugs and not dry_run and smtp is not None and admin_emails:
+        for b in bugs:
+            try:
+                notify.send_bug_report(
+                    smtp_user=smtp.user,
+                    smtp_password=smtp.password,
+                    to_addrs=admin_emails,
+                    bug=b,
+                )
+                log.info("emailed bug %s from %s to %d admin(s)", b.get("id"), b.get("email"), len(admin_emails))
+            except Exception:
+                log.exception("failed to send bug report %s; will retry next run", b.get("id"))
+                continue
+            if bug_consume:
+                bug_consume(b["key"])
+
     if snapshot_path:
         _write_snapshot(snapshot_path, snapshot)
 
@@ -177,6 +198,27 @@ def consume_pending(worker_url: str, runner_secret: str, key: str) -> None:
     pending_id = key.removeprefix("pending:")
     resp = requests.delete(
         f"{worker_url.rstrip('/')}/api/internal/pending/{pending_id}",
+        headers={"Authorization": f"Bearer {runner_secret}"},
+        timeout=20,
+    )
+    if resp.status_code not in (200, 204, 404):
+        resp.raise_for_status()
+
+
+def fetch_bugs(worker_url: str, runner_secret: str) -> list[dict[str, Any]]:
+    resp = requests.get(
+        f"{worker_url.rstrip('/')}/api/internal/bugs",
+        headers={"Authorization": f"Bearer {runner_secret}"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def consume_bug(worker_url: str, runner_secret: str, key: str) -> None:
+    bug_id = key.removeprefix("bug:")
+    resp = requests.delete(
+        f"{worker_url.rstrip('/')}/api/internal/bugs/{bug_id}",
         headers={"Authorization": f"Bearer {runner_secret}"},
         timeout=20,
     )
@@ -229,6 +271,14 @@ def cli() -> int:
     except Exception:
         log.exception("failed to fetch pending confirmations; continuing without them")
         pending = []
+    try:
+        bugs = fetch_bugs(worker_url, runner_secret)
+    except Exception:
+        log.exception("failed to fetch bug reports; continuing without them")
+        bugs = []
+    admin_emails = [
+        e.strip() for e in os.environ.get("ADMIN_EMAILS", "joshcharest1@gmail.com").split(",") if e.strip()
+    ]
 
     return main(
         args.state_dir,
@@ -237,6 +287,9 @@ def cli() -> int:
         snapshot_path=args.snapshot_path,
         pending=pending,
         pending_consume=lambda key: consume_pending(worker_url, runner_secret, key),
+        bugs=bugs,
+        bug_consume=lambda key: consume_bug(worker_url, runner_secret, key),
+        admin_emails=admin_emails,
     )
 
 

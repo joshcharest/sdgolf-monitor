@@ -878,6 +878,48 @@ form .hint code {
 .auth-form label { margin: 8px 0 4px; }
 .auth-form button.primary { margin-top: 14px; align-self: flex-start; }
 
+#bug-fab {
+  position: fixed;
+  right: 22px; bottom: 22px;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--accent);
+  border: 1px solid var(--accent-deep);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 22px;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 80;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  transition: background 0.15s, transform 0.05s;
+  line-height: 1;
+  padding: 0;
+}
+#bug-fab:hover { background: var(--panel-3); }
+#bug-fab:active { transform: translateY(1px); }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: modal-in 0.18s ease-out;
+}
+.modal-backdrop > .modal {
+  max-width: 520px;
+  width: 100%;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+@keyframes modal-in { from { opacity: 0; } to { opacity: 1; } }
+
 .user-badge {
   font-family: var(--font-mono);
   font-size: 11px;
