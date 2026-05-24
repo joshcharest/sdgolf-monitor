@@ -252,17 +252,28 @@ main {
   backdrop-filter: none;
 }
 
+/* The autobook toggle reuses .toggle's pill but adds a "AUTO" caption to
+ * its left so it's visually distinct from the enable toggle next to it.
+ * The caption is a <small> (not a <span>) on purpose: .toggle span styles
+ * the visual pill, and a span sibling would get pill-shaped on top of the
+ * caption text. */
 .check-card .autobook-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
+  width: auto;
 }
-.check-card .autobook-toggle .toggle-label {
+.check-card .autobook-caption {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-dim);
+  line-height: 1;
+}
+.check-card .autobook-toggle input:checked ~ .autobook-caption,
+.check-card .autobook-toggle:has(input:checked) .autobook-caption {
+  color: var(--accent);
 }
 .check-card h3.card-name {
   margin: 0;
