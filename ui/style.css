@@ -245,11 +245,24 @@ main {
   border: none;
   background: none;
   display: grid;
-  grid-template-columns: 1fr auto auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto auto;
   align-items: center;
   gap: 8px 10px;
   position: static;
   backdrop-filter: none;
+}
+
+.check-card .autobook-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.check-card .autobook-toggle .toggle-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 .check-card h3.card-name {
   margin: 0;
