@@ -240,17 +240,28 @@ main {
 .check-card.disabled { opacity: 0.55; }
 .check-card.disabled .card-name { text-decoration: line-through; color: var(--text-muted); }
 
+/* Two-row card header. Row 1: title (full width left) + matches chip on the
+ * right. Row 2: edit/subscribe on the left + mode control / autobook badge
+ * on the right. Splitting controls onto their own row gives the title room
+ * to breathe and makes the mode pills bigger touch targets. */
 .check-card header {
   padding: 0;
   border: none;
   background: none;
   display: grid;
-  grid-template-columns: 1fr auto auto auto auto;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
   align-items: center;
-  gap: 8px 10px;
+  gap: 10px 10px;
   position: static;
   backdrop-filter: none;
 }
+.check-card h3.card-name           { grid-column: 1; grid-row: 1; }
+.check-card .card-matches-summary  { grid-column: 2; grid-row: 1; justify-self: end; }
+.check-card .edit-btn,
+.check-card .subscribe-btn         { grid-column: 1; grid-row: 2; justify-self: start; }
+.check-card .card-mode             { grid-column: 2; grid-row: 2; justify-self: end; }
+.check-card .card-autobook-badge   { grid-column: 2; grid-row: 2; justify-self: end; }
 
 /* Segmented Off / Alert / Auto control. Mutually exclusive — only the
  * active pill is filled, so the user reads the current mode at a glance
@@ -290,15 +301,13 @@ main {
   margin: 0;
   font-family: var(--font-display);
   font-weight: 500;
-  font-size: 19px;
+  font-size: 20px;
   letter-spacing: -0.012em;
   color: var(--text);
   font-variation-settings: 'opsz' 60, 'SOFT' 40;
-  flex: 1 1 auto;
   min-width: 0;
-  /* Wrap long names instead of truncating — the right-side controls
-   * (matches chip + edit + segmented mode) take real estate, and "..." on
-   * a meaningful subscription name reads as a bug. */
+  /* The matches chip shares the row, so allow wrapping for very long names
+   * rather than truncating them. */
   overflow-wrap: anywhere;
   line-height: 1.2;
 }
@@ -1132,16 +1141,9 @@ form .hint code {
   .match-meta { font-size: 11.5px; }
   .match-day-toggle { font-size: 13px; padding: 11px 4px; }
   .match-course-header { font-size: 12.5px; }
-  /* Two-row header: name + toggle on top, chip + edit underneath */
-  .check-card header {
-    grid-template-columns: 1fr auto;
-    grid-template-rows: auto auto;
-  }
-  .check-card h3.card-name           { grid-column: 1; grid-row: 1; }
-  .check-card .card-mode             { grid-column: 2; grid-row: 1; }
-  .check-card .card-matches-summary  { grid-column: 1; grid-row: 2; justify-self: start; }
-  .check-card .edit-btn,
-  .check-card .subscribe-btn         { grid-column: 2; grid-row: 2; justify-self: end; }
+  /* Narrow screens use the same two-row layout as desktop (title on top,
+   * mode control + edit below). No overrides needed — the base rule
+   * already produces the right shape. */
   .window-row { flex-direction: column; align-items: stretch; }
   .date-input-row { flex-direction: column; align-items: stretch; }
   .date-input-row .date-label,
