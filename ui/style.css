@@ -268,10 +268,10 @@ main {
   border: 0;
   color: var(--text-dim);
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 5px 11px;
+  padding: 4px 8px;
   border-radius: 999px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
@@ -296,9 +296,11 @@ main {
   font-variation-settings: 'opsz' 60, 'SOFT' 40;
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wrap long names instead of truncating — the right-side controls
+   * (matches chip + edit + segmented mode) take real estate, and "..." on
+   * a meaningful subscription name reads as a bug. */
+  overflow-wrap: anywhere;
+  line-height: 1.2;
 }
 
 .check-card .card-desc { display: none; }
