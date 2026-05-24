@@ -42,6 +42,34 @@ def _unsubscribe_url(worker_url: str | None, secret: str | None, email: str, con
     return f"{worker_url.rstrip('/')}/api/unsubscribe?t={token}"
 
 
+# Token TTL for the one-click "Book now" link in emails. Capped further by
+# the worker's verifyBookToken (won't exceed the slot's tee-off time).
+_BOOK_TTL_SEC = 7 * 24 * 60 * 60
+
+
+def _book_token(slot: TeeTime, config_id: str, secret: str) -> str:
+    """Mirror of worker.js mintBookToken. Keep the payload schema in sync."""
+    payload = {
+        "config_id": config_id,
+        "target": slot.target,
+        "date": slot.date,
+        "time": slot.time,
+        "holes": int(slot.holes),
+        "players": max(1, min(4, int(slot.available_spots or 4))),
+        "exp": int(time.time()) + _BOOK_TTL_SEC,
+    }
+    body = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sig = _b64url(hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest())
+    return f"{body}.{sig}"
+
+
+def _book_url(worker_url: str | None, secret: str | None, slot: TeeTime, config_id: str) -> str | None:
+    if not worker_url or not secret or not config_id:
+        return None
+    token = _book_token(slot, config_id, secret)
+    return f"{worker_url.rstrip('/')}/api/book?t={token}"
+
+
 # Course name -> (ForeUp facility id, teesheet/schedule id). Used to construct
 # booking deep-links per match. The facility id in the URL path determines
 # which course the SPA loads — using Balboa's (19348) for a Torrey schedule
@@ -457,6 +485,7 @@ def send_email(
     config_id: str | None = None,
     worker_url: str | None = None,
     unsubscribe_secret: str | None = None,
+    autobook_account_email: str | None = None,
 ) -> None:
     """Send a digest email for one check set's new matches, one message per recipient.
 
@@ -465,23 +494,43 @@ def send_email(
     the set and can delete it from the UI). Sent as separate messages so each
     recipient only sees their own address and gets their own link.
 
+    When ``autobook_account_email`` is set AND the recipient is the owner AND
+    that owner matches the autobook account, the email also includes a per-slot
+    one-click "Book" link (the worker enforces the same owner check on the
+    redeem side, so the link is useless to anyone else).
+
     Raises smtplib.SMTPException on transport failure.
     """
     if not new_times or not to_addrs:
         return
     owner_norm = (owner or "").strip().lower()
+    autobook_norm = (autobook_account_email or "").strip().lower()
+    book_links_enabled = bool(autobook_norm) and owner_norm == autobook_norm and bool(config_id)
+    book_urls = (
+        {tt.key: _book_url(worker_url, unsubscribe_secret, tt, config_id) for tt in new_times}
+        if book_links_enabled else None
+    )
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
         smtp.login(smtp_user, smtp_password)
         for addr in to_addrs:
             is_owner = addr.strip().lower() == owner_norm
             unsub = None if is_owner else _unsubscribe_url(worker_url, unsubscribe_secret, addr, config_id or "")
+            # Only the owner sees the "Book now" link — subscribers wouldn't be
+            # able to redeem it anyway (worker checks owner-account match).
+            urls_for_recipient = book_urls if is_owner else None
             msg = EmailMessage()
             msg["From"] = smtp_user
             msg["To"] = addr
             msg["Subject"] = _subject(set_name, new_times)
             _set_list_unsubscribe(msg, unsub)
-            msg.set_content(_plaintext(new_times, set_name=set_name, unsubscribe_url=unsub))
-            msg.add_alternative(_html(new_times, set_name=set_name, unsubscribe_url=unsub), subtype="html")
+            msg.set_content(_plaintext(
+                new_times, set_name=set_name, unsubscribe_url=unsub,
+                book_urls=urls_for_recipient,
+            ))
+            msg.add_alternative(_html(
+                new_times, set_name=set_name, unsubscribe_url=unsub,
+                book_urls=urls_for_recipient,
+            ), subtype="html")
             smtp.send_message(msg, to_addrs=[addr])
 
 
@@ -507,6 +556,7 @@ def _plaintext(
     *,
     set_name: str | None = None,
     unsubscribe_url: str | None = None,
+    book_urls: dict[str, str | None] | None = None,
 ) -> str:
     lines = ["New tee times matching your filter:\n"]
     for tt in sorted(new_times, key=lambda t: (t.date, t.time, t.target)):
@@ -517,7 +567,10 @@ def _plaintext(
         )
         url = _booking_url(tt.target, tt.date)
         if url:
-            lines.append(f"    {url}")
+            lines.append(f"    Open in ForeUp: {url}")
+        book_url = (book_urls or {}).get(tt.key)
+        if book_url:
+            lines.append(f"    Book now (one click): {book_url}")
     lines.append(f"\nfetched {datetime.now().isoformat(timespec='seconds')}")
     if unsubscribe_url:
         label = f' "{set_name}"' if set_name else ""
@@ -530,8 +583,10 @@ def _html(
     *,
     set_name: str | None = None,
     unsubscribe_url: str | None = None,
+    book_urls: dict[str, str | None] | None = None,
 ) -> str:
     rows = []
+    show_book_col = bool(book_urls) and any(book_urls.values())
     for tt in sorted(new_times, key=lambda t: (t.date, t.time, t.target)):
         fee_text = _fee_text(tt.target, tt.green_fee, tt.date)
         time_str = _fmt_12h(tt.time)
@@ -540,16 +595,32 @@ def _html(
             f'<a href="{html_escape(url, quote=True)}">{html_escape(time_str)}</a>'
             if url else html_escape(time_str)
         )
+        book_cell = ""
+        if show_book_col:
+            burl = (book_urls or {}).get(tt.key)
+            book_cell = (
+                "<td>"
+                + (
+                    f"<a href='{html_escape(burl, quote=True)}' "
+                    f"style='display:inline-block;background:#1565c0;color:#fff;"
+                    f"text-decoration:none;padding:6px 12px;border-radius:4px;"
+                    f"font-size:12px;font-weight:600'>Book</a>"
+                    if burl else ""
+                )
+                + "</td>"
+            )
         rows.append(
             f"<tr><td>{html_escape(_fmt_date(tt.date))}</td><td>{time_cell}</td>"
             f"<td>{html_escape(tt.target)}</td>"
             f"<td>{tt.available_spots}</td><td>{tt.holes}</td>"
-            f"<td>{html_escape(fee_text)}</td></tr>"
+            f"<td>{html_escape(fee_text)}</td>{book_cell}</tr>"
         )
+    book_header = "<th>Book</th>" if show_book_col else ""
     table = (
         "<table style='border-collapse:collapse' cellpadding='6'>"
         "<thead><tr style='background:#f0f0f0'>"
         "<th>Date</th><th>Time</th><th>Course</th><th>Spots</th><th>Holes</th><th>Fee</th>"
+        f"{book_header}"
         "</tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table>"

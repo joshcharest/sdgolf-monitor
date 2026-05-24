@@ -53,6 +53,10 @@ export default {
     if (pathname === "/api/unsubscribe" && method === "GET")  return handleUnsubscribeGet(request, env);
     if (pathname === "/api/unsubscribe" && method === "POST") return handleUnsubscribePost(request, env);
 
+    if (pathname === "/api/book"     && method === "GET")  return handleBookGet(request, env);
+    if (pathname === "/api/book"     && method === "POST") return handleBookPost(request, env);
+    if (pathname === "/api/book/now" && method === "POST") return handleBookNow(request, env);
+
     const configMatch = pathname.match(/^\/api\/configs\/([a-z0-9-]{1,128})(?:\/(subscribe|unsubscribe))?$/);
     if (configMatch) {
       const [, id, action] = configMatch;
@@ -515,6 +519,216 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
   ));
+}
+
+// ---------- one-click "Book now" ------------------------------------------
+//
+// Two entry points share the same dry-run booking path:
+//   - /api/book?t=TOKEN     (from email link; GET shows confirm page, POST
+//                           executes; pattern mirrors unsubscribe so email
+//                           scanners can't trigger a real charge with a GET)
+//   - /api/book/now         (from in-app button; auth'd + JSON, no token)
+//
+// Currently dry-run: both endpoints write a `book:{slot_key}` KV record
+// (acts as dedup so the same slot can't be double-booked) and respond with
+// "would have booked". When the real ForeUp POST is wired up, swap the
+// stub `simulateBooking` call for the actual request.
+
+// Booking is restricted to whichever account owns the runner's ForeUp login
+// (matches the runner's AUTOBOOK_OWNER_EMAIL gating). Without this, a
+// subscriber could trigger a charge on the runner's card.
+function bookingOwnerEmail(env) {
+  return (env.AUTOBOOK_OWNER_EMAIL || "sdgolfmonitor@gmail.com").trim().toLowerCase();
+}
+
+function slotKey(s) {
+  return `${s.target}|${s.date}|${s.time}|${s.holes}`;
+}
+
+async function mintBookToken(slot, configId, secret) {
+  // exp = min(now + 7d, slot tee-off). The link is useless after the tee
+  // time anyway, and shorter TTL limits replay if a forwarded email leaks.
+  const teeoff = teeoffEpoch(slot.date, slot.time);
+  const cap = Math.floor(Date.now() / 1000) + 7 * 86400;
+  const exp = teeoff ? Math.min(cap, teeoff) : cap;
+  const payload = {
+    config_id: configId,
+    target: slot.target,
+    date: slot.date,
+    time: slot.time,
+    holes: Number(slot.holes),
+    players: Number(slot.players ?? slot.available_spots ?? 4),
+    exp,
+  };
+  const body = b64urlEncodeStr(JSON.stringify(payload));
+  const sig = await hmacSha256(secret, body);
+  return `${body}.${sig}`;
+}
+
+async function verifyBookToken(token, secret) {
+  if (!token) return null;
+  const dot = token.lastIndexOf(".");
+  if (dot < 0) return null;
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = await hmacSha256(secret, body);
+  if (!constantTimeEqStr(sig, expected)) return null;
+  let p;
+  try { p = JSON.parse(b64urlDecodeStr(body)); } catch { return null; }
+  if (typeof p.exp !== "number" || p.exp < Math.floor(Date.now() / 1000)) return null;
+  for (const k of ["config_id", "target", "date", "time"]) {
+    if (typeof p[k] !== "string" || !p[k]) return null;
+  }
+  if (!Number.isFinite(p.holes) || !Number.isFinite(p.players)) return null;
+  return p;
+}
+
+function teeoffEpoch(dateStr, timeStr) {
+  // San Diego is Pacific. The runner enforces a 3h lead time on autobook,
+  // but the email "Book" button is user-initiated — we only cap at tee-off.
+  // For Universal Time conversion we approximate the offset (PDT = -07:00,
+  // PST = -08:00). DST transitions are rare enough that being off by an
+  // hour twice a year doesn't matter for an upper-bound expiry.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || !/^\d{2}:\d{2}$/.test(timeStr)) return null;
+  const iso = `${dateStr}T${timeStr}:00-07:00`;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+async function handleBookGet(request, env) {
+  const url = new URL(request.url);
+  const token = url.searchParams.get("t") || "";
+  if (!env.RUNNER_SECRET) return bookPage("Booking is not configured on this deployment.", 503);
+  const payload = await verifyBookToken(token, env.RUNNER_SECRET);
+  if (!payload) return bookPage("This booking link is invalid or has expired.", 400);
+  const cfg = await readConfig(env, payload.config_id);
+  if (!cfg) return bookPage("That subscription no longer exists.", 404);
+  if ((cfg.owner || "").toLowerCase() !== bookingOwnerEmail(env)) {
+    return bookPage("Only the account that owns the runner's ForeUp login can book.", 403);
+  }
+  // Dedup check — show "already booked" instead of confirm page if there's
+  // a record for this slot already (could be from a prior click or autobook).
+  const existing = await env.SNAPSHOT_KV.get(`book:${slotKey(payload)}`);
+  if (existing) return bookPage(`This slot was already booked (${escapeHtml(existing)}).`, 200);
+  return bookConfirmPage(token, payload);
+}
+
+async function handleBookPost(request, env) {
+  const url = new URL(request.url);
+  let token = url.searchParams.get("t") || "";
+  if (!token) {
+    const ct = request.headers.get("content-type") || "";
+    if (ct.includes("application/x-www-form-urlencoded")) {
+      try { token = String((await request.formData()).get("t") || ""); } catch { /* ignore */ }
+    }
+  }
+  if (!env.RUNNER_SECRET) return bookPage("Booking is not configured on this deployment.", 503);
+  const payload = await verifyBookToken(token, env.RUNNER_SECRET);
+  if (!payload) return bookPage("This booking link is invalid or has expired.", 400);
+  const cfg = await readConfig(env, payload.config_id);
+  if (!cfg) return bookPage("That subscription no longer exists.", 404);
+  if ((cfg.owner || "").toLowerCase() !== bookingOwnerEmail(env)) {
+    return bookPage("Only the account that owns the runner's ForeUp login can book.", 403);
+  }
+  const result = await simulateBooking(env, cfg, payload);
+  if (result.alreadyBooked) {
+    return bookPage(`This slot was already booked (${escapeHtml(result.at)}).`, 200);
+  }
+  return bookPage(bookSuccessHtml(payload, /* dryRun */ true), 200);
+}
+
+async function handleBookNow(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  if (!isAdminSession(session, env)) return json({ error: "admin only" }, 403);
+  const body = await safeJson(request);
+  if (!body || typeof body !== "object") return json({ error: "invalid body" }, 400);
+  for (const k of ["config_id", "target", "date", "time"]) {
+    if (typeof body[k] !== "string" || !body[k]) return json({ error: `${k} required` }, 400);
+  }
+  const holes = Number(body.holes);
+  const players = Number(body.players);
+  if (!Number.isFinite(holes) || !Number.isFinite(players)) {
+    return json({ error: "holes and players must be numbers" }, 400);
+  }
+  const cfg = await readConfig(env, body.config_id);
+  if (!cfg) return json({ error: "subscription not found" }, 404);
+  if (cfg.owner !== session.email) return json({ error: "not the owner" }, 403);
+  if ((cfg.owner || "").toLowerCase() !== bookingOwnerEmail(env)) {
+    return json({ error: "owner does not match runner account" }, 403);
+  }
+  const slot = { target: body.target, date: body.date, time: body.time, holes, players };
+  const result = await simulateBooking(env, cfg, slot);
+  if (result.alreadyBooked) return json({ booked: false, already: true, at: result.at }, 409);
+  return json({ booked: true, dry_run: true, slot });
+}
+
+async function simulateBooking(env, cfg, slot) {
+  // Dry-run: record-and-return. The real ForeUp POST goes here once we have
+  // the captured request shape — it should run BEFORE the KV write so we
+  // don't claim "booked" for a slot the API rejected.
+  const key = `book:${slotKey(slot)}`;
+  const existing = await env.SNAPSHOT_KV.get(key);
+  if (existing) return { alreadyBooked: true, at: existing };
+  const at = new Date().toISOString();
+  // 60-day TTL — long enough to cover any reasonable booking window.
+  await env.SNAPSHOT_KV.put(key, at, { expirationTtl: 60 * 86400 });
+  console.log(`book(dry-run): ${cfg.id} ${slotKey(slot)} at ${at}`);
+  return { alreadyBooked: false, at };
+}
+
+function bookConfirmPage(token, p) {
+  const slotLine = `${escapeHtml(p.date)} ${escapeHtml(p.time)} · ${escapeHtml(p.target)} · ${escapeHtml(String(p.players))} player(s) · ${escapeHtml(String(p.holes))} holes`;
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Book tee time — sdgolf</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 520px; margin: 80px auto; padding: 0 20px; color: #222; line-height: 1.5; }
+  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 28px; }
+  a { color: #1565c0; }
+  h1 { font-size: 18px; margin: 0 0 12px 0; }
+  .slot { font-family: ui-monospace, monospace; background: #f5f5f5; padding: 10px; border-radius: 4px; margin: 14px 0; }
+  button { background: #1565c0; color: #fff; border: 0; padding: 12px 24px; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600; }
+  button:hover { background: #0d47a1; }
+  .note { color: #888; font-size: 12px; margin-top: 18px; }
+</style></head>
+<body><div class="card">
+  <h1>sdgolf — confirm booking</h1>
+  <p>Book this tee time?</p>
+  <div class="slot">${slotLine}</div>
+  <form method="POST" action="/api/book">
+    <input type="hidden" name="t" value="${escapeHtml(token)}">
+    <button type="submit">Book now</button>
+  </form>
+  <p class="note">Dry-run mode: a record is logged but no actual ForeUp booking is placed yet.</p>
+  <p><a href="/">Back to sdgolf</a></p>
+</div></body></html>`;
+  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
+
+function bookSuccessHtml(p, dryRun) {
+  const verb = dryRun ? "Would have booked" : "Booked";
+  const slotLine = `${escapeHtml(p.date)} ${escapeHtml(p.time)} · ${escapeHtml(p.target)} · ${escapeHtml(String(p.players))} player(s) · ${escapeHtml(String(p.holes))} holes`;
+  const note = dryRun
+    ? `<p class="note">Dry-run mode: this records the click but no real ForeUp booking was placed. ` +
+      `Once the real booking call is wired up, this page will show your reservation confirmation.</p>`
+    : "";
+  return `<strong>${verb}</strong> the following tee time:<div class="slot" style="font-family:ui-monospace,monospace;background:#f5f5f5;padding:10px;border-radius:4px;margin:14px 0">${slotLine}</div>${note}`;
+}
+
+function bookPage(message, status) {
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Book tee time — sdgolf</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 520px; margin: 80px auto; padding: 0 20px; color: #222; line-height: 1.5; }
+  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 28px; }
+  a { color: #1565c0; }
+  h1 { font-size: 18px; margin: 0 0 12px 0; }
+  .note { color: #888; font-size: 12px; margin-top: 18px; }
+</style></head>
+<body><div class="card"><h1>sdgolf</h1><p>${message}</p><p><a href="/">Back to sdgolf</a></p></div></body></html>`;
+  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 
 async function handleInternalConfigs(request, env) {

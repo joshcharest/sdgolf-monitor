@@ -121,6 +121,7 @@ def main(
                 worker_url=worker_url,
                 unsubscribe_secret=unsubscribe_secret,
                 autobook_budget=autobook_budget,
+                autobook_account_email=autobook_account_email,
             )
             snapshot[config_id] = {
                 **common,

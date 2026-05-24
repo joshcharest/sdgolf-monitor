@@ -92,6 +92,7 @@ const apiAdminPutEmails = (emails)       => api("PUT",    "/api/admin/emails", {
 const apiAdminGetUsers  = ()             => api("GET",    "/api/admin/users");
 const apiAdminResetUser = (email)        => api("DELETE", `/api/admin/users/${encodeURIComponent(email)}`);
 const apiBugReport      = (payload)      => api("POST",   "/api/bug-report", payload);
+const apiBookNow        = (payload)      => api("POST",   "/api/book/now", payload);
 
 // Fire-and-forget: tell the Worker to dispatch the monitor workflow right
 // now so the snapshot reflects this config mutation within ~30s instead of
@@ -376,11 +377,11 @@ function renderCard(cfg, snapshotEntry) {
   const windowsStr = (f.windows || []).map(w => `${fmt12h(w.start)}–${fmt12h(w.end)}`).join(" · ") || "any time";
   article.querySelector(".card-filter").textContent = `${holesStr} · ${playersStr} · ${windowsStr}`;
 
-  renderCardMatches(article, snapshotEntry);
+  renderCardMatches(article, cfg, snapshotEntry);
   return node;
 }
 
-function renderCardMatches(article, entry) {
+function renderCardMatches(article, cfg, entry) {
   const wrapper = article.querySelector(".card-matches");
   const summary = article.querySelector(".card-matches-summary");
   const list = article.querySelector(".card-matches-list");
@@ -427,6 +428,20 @@ function renderCardMatches(article, entry) {
     for (const arr of byDate.values()) arr.sort((a, b) => a.time.localeCompare(b.time));
   }
 
+  // Per-slot "Book" button only for admins on their own configs — same
+  // gating as the worker's /api/book/now endpoint, so showing it elsewhere
+  // would render a broken control.
+  const onBook = (USER?.is_admin && cfg.owner === USER.email)
+    ? async (m) => apiBookNow({
+        config_id: cfg.id,
+        target: m.target,
+        date: m.date,
+        time: m.time,
+        holes: m.holes,
+        players: Math.max(1, Math.min(4, m.available_spots || 4)),
+      })
+    : null;
+
   const sortedCourses = [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   for (const [course, byDate] of sortedCourses) {
     const header = document.createElement("li");
@@ -436,13 +451,13 @@ function renderCardMatches(article, entry) {
 
     const sortedDates = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]));
     for (const [date, dateMatches] of sortedDates) {
-      list.appendChild(buildDayRow(date, dateMatches));
+      list.appendChild(buildDayRow(date, dateMatches, onBook));
     }
   }
   wrapper.hidden = false;
 }
 
-function buildDayRow(date, dayMatches) {
+function buildDayRow(date, dayMatches, onBook) {
   const li = document.createElement("li");
   li.className = "match-day-row";
 
@@ -457,7 +472,7 @@ function buildDayRow(date, dayMatches) {
   const times = document.createElement("ul");
   times.className = "match-times-list";
   times.hidden = true;
-  for (const m of dayMatches) times.appendChild(buildTimeLi(m));
+  for (const m of dayMatches) times.appendChild(buildTimeLi(m, onBook));
 
   toggle.addEventListener("click", () => {
     const expanded = !times.hidden;
@@ -470,8 +485,11 @@ function buildDayRow(date, dayMatches) {
   return li;
 }
 
-function buildTimeLi(m) {
+function buildTimeLi(m, onBook) {
   const li = document.createElement("li");
+
+  const row = document.createElement("div");
+  row.className = "match-row";
 
   const link = document.createElement("a");
   link.className = "match-link match-time";
@@ -497,7 +515,35 @@ function buildTimeLi(m) {
   meta.textContent = metaParts.join(" · ");
 
   link.append(primary, meta);
-  li.append(link);
+  row.appendChild(link);
+
+  if (onBook) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "match-book-btn";
+    btn.textContent = "Book";
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!confirm(`Book ${fmt12h(m.time)} at ${m.target}?`)) return;
+      btn.disabled = true;
+      btn.textContent = "Booking…";
+      try {
+        const result = await onBook(m);
+        btn.textContent = result?.dry_run ? "Booked (dry)" : "Booked";
+        toast(result?.dry_run
+          ? `Booked ${fmt12h(m.time)} ${m.target} (dry run)`
+          : `Booked ${fmt12h(m.time)} ${m.target}`);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Book";
+        toast(`Book failed: ${err.message}`, "error");
+      }
+    });
+    row.appendChild(btn);
+  }
+
+  li.appendChild(row);
   return li;
 }
 
