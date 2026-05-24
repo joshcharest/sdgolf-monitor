@@ -163,12 +163,19 @@ def test_no_configs_returns_zero(tmp_path, monkeypatch, caplog):
 
 def test_autobook_fires_for_owner_and_caps_at_one_per_day(tmp_path, monkeypatch):
     """Owner's autobook fires once; second config that day is skipped by the cap."""
+    from datetime import date as _date_mod, datetime, timezone
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     cfg_a = _config("alpha", ["A"], owner="owner@example.com")
     cfg_a["autobook"] = {"enabled": True}
     cfg_b = _config("beta", ["B"], owner="owner@example.com")
     cfg_b["autobook"] = {"enabled": True}
+
+    # Freeze "now" so the slot dates land deterministically inside the
+    # no-fee 0-7 day window and outside the 3h lead-time guard.
+    fake_now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(autobook, "datetime", _FakeDatetime(fake_now))
+    monkeypatch.setattr(autobook, "date", _FakeDate(_date_mod(2026, 5, 30)))
 
     rows_a = [{"date": "2026-06-01", "time": "08:00", "spots": 3}]
     rows_b = [{"date": "2026-06-02", "time": "09:00", "spots": 4}]
@@ -197,16 +204,18 @@ def test_autobook_fires_for_owner_and_caps_at_one_per_day(tmp_path, monkeypatch)
 
 def test_autobook_skips_slot_within_lead_time(tmp_path, monkeypatch):
     """A near-term slot is filtered out; the next-earliest eligible one wins."""
-    from datetime import datetime, timezone
+    from datetime import date as _date_mod, datetime, timezone
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     cfg = _config("alpha", ["A"], owner="owner@example.com")
     cfg["autobook"] = {"enabled": True}
 
     # Freeze "now" to 2026-06-01 14:00 UTC (= 07:00 Pacific) so we control
-    # the 3-hour lead-time window deterministically.
+    # the 3-hour lead-time window deterministically. Freeze the date too so
+    # the slot stays inside the no-fee 0-7 day window.
     fake_now = datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(autobook, "datetime", _FakeDatetime(fake_now))
+    monkeypatch.setattr(autobook, "date", _FakeDate(_date_mod(2026, 6, 1)))
 
     # 08:00 Pacific = +1h from now (too soon), 11:00 Pacific = +4h (eligible).
     rows = [
@@ -244,12 +253,64 @@ class _FakeDatetime:
         return real.fromisoformat(s)
 
 
+def test_autobook_skips_slot_in_advanced_fee_window(tmp_path, monkeypatch):
+    """A slot 8+ days out (Advanced Booking Fee territory) is skipped."""
+    from datetime import date, datetime, timezone
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    cfg = _config("alpha", ["A"], owner="owner@example.com")
+    cfg["autobook"] = {"enabled": True}
+
+    # Freeze "now" to 2026-06-01 16:00 UTC (09:00 Pacific) so today=2026-06-01.
+    fake_now = datetime(2026, 6, 1, 16, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(autobook, "datetime", _FakeDatetime(fake_now))
+    monkeypatch.setattr(autobook, "date", _FakeDate(date(2026, 6, 1)))
+
+    # 2026-06-08 = +7 days (in 0-7 window, eligible);
+    # 2026-06-09 = +8 days (advanced-fee window, must skip).
+    rows = [
+        {"date": "2026-06-09", "time": "08:00"},
+        {"date": "2026-06-08", "time": "08:00"},
+    ]
+    client = StubClient(by_target={"A": rows})
+
+    monkeypatch.setattr(runner.notify, "send_email", lambda **kw: None)
+    autobook_calls: list[dict] = []
+    monkeypatch.setattr(runner.notify, "send_autobook_email",
+                        lambda **kw: autobook_calls.append(kw))
+
+    budget = autobook.Budget({"date": "", "slots": []}, "owner@example.com")
+    smtp = runner.SmtpCreds(user="u", password="p")
+    runner.run_check_set(client=client, cfg=cfg, state_path=state_dir / "alpha.json",
+                         set_name="alpha", dry_run=False, smtp=smtp,
+                         autobook_budget=budget)
+
+    assert len(autobook_calls) == 1
+    assert autobook_calls[0]["slot"].date == "2026-06-08"
+
+
+class _FakeDate:
+    """Patch target for autobook.date so date.today() is deterministic."""
+    def __init__(self, today):
+        self._today = today
+    def today(self):
+        return self._today
+    def fromisoformat(self, s):
+        from datetime import date as real
+        return real.fromisoformat(s)
+
+
 def test_autobook_skips_when_owner_isnt_runner_account(tmp_path, monkeypatch):
     """Subscriber-owned configs must NOT autobook on the runner's account."""
+    from datetime import date as _date_mod, datetime, timezone
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     cfg = _config("alpha", ["A"], owner="someone-else@example.com")
     cfg["autobook"] = {"enabled": True}
+
+    fake_now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(autobook, "datetime", _FakeDatetime(fake_now))
+    monkeypatch.setattr(autobook, "date", _FakeDate(_date_mod(2026, 5, 30)))
 
     rows = [{"date": "2026-06-01", "time": "08:00"}]
     client = StubClient(by_target={"A": rows})

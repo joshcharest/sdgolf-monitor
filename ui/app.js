@@ -284,58 +284,20 @@ function renderCard(cfg, snapshotEntry) {
   const enabled = cfg.enabled !== false;
   if (!enabled) article.classList.add("disabled");
 
-  // Admin+owner gets an inline toggle; everyone else sees the read-only badge
-  // when autobook is on. The toggle and badge are mutually exclusive — the
-  // toggle conveys state too, so showing both would be redundant noise.
-  const canControlAutobook = USER?.is_admin && cfg.owner === USER.email;
-  if (canControlAutobook) {
-    const abToggleLabel = article.querySelector(".autobook-toggle");
-    const abToggle = article.querySelector(".autobook-toggle-input");
-    abToggleLabel.hidden = false;
-    abToggle.checked = Boolean(cfg.autobook?.enabled);
-    abToggle.addEventListener("change", async () => {
-      const cached = CACHE.get(cfg.id);
-      if (!cached) return;
-      const next = { ...cached, autobook: { enabled: abToggle.checked } };
-      try {
-        const saved = await apiUpdateConfig(cfg.id, next);
-        CACHE.set(cfg.id, saved);
-        toast(`${cfg.name}: auto-book ${abToggle.checked ? "on" : "off"}`);
-      } catch (e) {
-        abToggle.checked = !abToggle.checked;  // revert
-        toast(`Could not toggle auto-book: ${e.message}`, "error");
-      }
-    });
-  } else if (cfg.autobook?.enabled) {
+  // Non-owners get a read-only badge when autobook is on; owners get the
+  // segmented Off/Alert/Auto control wired up below.
+  const isOwner = cfg.owner === USER.email;
+  if (!isOwner && cfg.autobook?.enabled) {
     article.querySelector(".card-autobook-badge").hidden = false;
   }
-
-  const isOwner = cfg.owner === USER.email;
   const editBtn = article.querySelector(".edit-btn");
   const subscribeBtn = article.querySelector(".subscribe-btn");
-  const toggleLabel = article.querySelector(".toggle");
-  const toggle = article.querySelector(".enabled-toggle");
+  const modeGroup = article.querySelector(".card-mode");
 
   if (isOwner) {
     editBtn.hidden = false;
-    toggleLabel.hidden = false;
-    toggle.checked = enabled;
     editBtn.addEventListener("click", () => renderEdit(cfg.id));
-    toggle.addEventListener("change", async () => {
-      const cached = CACHE.get(cfg.id);
-      if (!cached) return;
-      const next = { ...cached, enabled: toggle.checked };
-      try {
-        const saved = await apiUpdateConfig(cfg.id, next);
-        CACHE.set(cfg.id, saved);
-        article.classList.toggle("disabled", !toggle.checked);
-        triggerDispatch();
-        toast(`${cfg.name}: ${toggle.checked ? "enabled" : "disabled"}`);
-      } catch (e) {
-        toggle.checked = !toggle.checked;  // revert
-        toast(`Could not toggle: ${e.message}`, "error");
-      }
-    });
+    setupModeControl(article, modeGroup, cfg);
   } else {
     subscribeBtn.hidden = false;
     const subscribed = (cfg.subscribers || []).includes(USER.email);
@@ -380,6 +342,60 @@ function renderCard(cfg, snapshotEntry) {
   renderCardMatches(article, cfg, snapshotEntry);
   return node;
 }
+
+// Three-state segmented control for the card header: Off / Alert / Auto.
+// Maps to (enabled, autobook.enabled) so a single click expresses the user
+// intent without forcing them to reason about two toggles. The Auto pill is
+// admin-only; non-admins see just Off / Alert.
+function setupModeControl(article, group, cfg) {
+  group.hidden = false;
+  const autoBtn = group.querySelector('[data-mode="auto"]');
+  if (USER?.is_admin) autoBtn.hidden = false;
+
+  const currentMode = () => {
+    if (cfg.enabled === false) return "off";
+    return cfg.autobook?.enabled ? "auto" : "alert";
+  };
+  const paint = (mode) => {
+    for (const btn of group.querySelectorAll(".seg")) {
+      btn.classList.toggle("active", btn.dataset.mode === mode);
+    }
+    article.classList.toggle("disabled", mode === "off");
+  };
+  paint(currentMode());
+
+  group.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".seg");
+    if (!btn || btn.hidden || btn.disabled) return;
+    const mode = btn.dataset.mode;
+    const prev = currentMode();
+    if (prev === mode) return;
+    paint(mode);  // optimistic
+    for (const b of group.querySelectorAll(".seg")) b.disabled = true;
+    const cached = CACHE.get(cfg.id) || cfg;
+    const next = {
+      ...cached,
+      enabled: mode !== "off",
+      autobook: { enabled: mode === "auto" },
+    };
+    try {
+      const saved = await apiUpdateConfig(cfg.id, next);
+      CACHE.set(saved.id, saved);
+      // Mutate the cfg the closure captured so re-clicks use fresh state.
+      cfg.enabled = saved.enabled;
+      cfg.autobook = saved.autobook;
+      triggerDispatch();
+      toast(`${cfg.name}: ${MODE_LABEL[mode]}`);
+    } catch (err) {
+      paint(prev);
+      toast(`Could not change mode: ${err.message}`, "error");
+    } finally {
+      for (const b of group.querySelectorAll(".seg")) b.disabled = false;
+    }
+  });
+}
+
+const MODE_LABEL = { off: "off", alert: "alerts on", auto: "auto-book on" };
 
 function renderCardMatches(article, cfg, entry) {
   const wrapper = article.querySelector(".card-matches");

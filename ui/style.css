@@ -245,36 +245,47 @@ main {
   border: none;
   background: none;
   display: grid;
-  grid-template-columns: 1fr auto auto auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto;
   align-items: center;
   gap: 8px 10px;
   position: static;
   backdrop-filter: none;
 }
 
-/* The autobook toggle reuses .toggle's pill but adds a "AUTO" caption to
- * its left so it's visually distinct from the enable toggle next to it.
- * The caption is a <small> (not a <span>) on purpose: .toggle span styles
- * the visual pill, and a span sibling would get pill-shaped on top of the
- * caption text. */
-.check-card .autobook-toggle {
+/* Segmented Off / Alert / Auto control. Mutually exclusive — only the
+ * active pill is filled, so the user reads the current mode at a glance
+ * instead of decoding two toggles. The Auto pill is hidden for non-admins. */
+.check-card .card-mode {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: auto;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--panel-3);
 }
-.check-card .autobook-caption {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+.check-card .card-mode .seg {
+  background: transparent;
+  border: 0;
   color: var(--text-dim);
-  line-height: 1;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 5px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
-.check-card .autobook-toggle input:checked ~ .autobook-caption,
-.check-card .autobook-toggle:has(input:checked) .autobook-caption {
-  color: var(--accent);
+.check-card .card-mode .seg:hover:not(.active) { color: var(--text); }
+.check-card .card-mode .seg.active {
+  background: var(--accent-deep);
+  color: var(--text);
 }
+.check-card .card-mode .seg.seg-auto.active {
+  background: var(--accent);
+  color: #1a1a1a;
+}
+.check-card .card-mode .seg:disabled { opacity: 0.5; cursor: default; }
 .check-card h3.card-name {
   margin: 0;
   font-family: var(--font-display);
@@ -1125,7 +1136,7 @@ form .hint code {
     grid-template-rows: auto auto;
   }
   .check-card h3.card-name           { grid-column: 1; grid-row: 1; }
-  .check-card .toggle                { grid-column: 2; grid-row: 1; }
+  .check-card .card-mode             { grid-column: 2; grid-row: 1; }
   .check-card .card-matches-summary  { grid-column: 1; grid-row: 2; justify-self: start; }
   .check-card .edit-btn,
   .check-card .subscribe-btn         { grid-column: 2; grid-row: 2; justify-self: end; }

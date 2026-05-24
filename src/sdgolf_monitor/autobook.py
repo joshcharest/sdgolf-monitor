@@ -28,6 +28,13 @@ from .client import TeeTime
 # wake-up + commute + ForeUp's typical check-in window.
 MIN_LEAD_TIME_SEC = 3 * 60 * 60
 
+# 8+ days out drops the slot into the resident 51735 booking class, which
+# carries the non-refundable Advanced Booking Fee ($10 Balboa, $32 Torrey).
+# Autobook stays inside the no-fee 0-7 day window — the one-click "Book"
+# button is unaffected because that's an explicit user action and the fee
+# is visible in the UI.
+ADVANCED_FEE_THRESHOLD_DAYS = 8
+
 _COURSE_TZ = ZoneInfo("America/Los_Angeles")
 
 log = logging.getLogger("sdgolf")
@@ -106,6 +113,22 @@ def far_enough_out(slot: TeeTime, now: datetime | None = None) -> bool:
     return (slot_dt - current).total_seconds() >= MIN_LEAD_TIME_SEC
 
 
+def has_advanced_fee(slot: TeeTime, today: date | None = None) -> bool:
+    """True if booking this slot would incur the non-refundable booking fee.
+
+    Date-based (not the ForeUp ``booking_fee`` field) because Torrey's API
+    returns ``booking_fee_required=false`` for slots that DO charge the fee
+    under booking class 929. The 8-day cutoff is the resident class boundary.
+    """
+    try:
+        slot_d = date.fromisoformat(slot.date)
+    except ValueError:
+        # Unparseable date: be conservative and treat as in-fee window.
+        return True
+    today = today or date.today()
+    return (slot_d - today).days >= ADVANCED_FEE_THRESHOLD_DAYS
+
+
 def players_for(slot: TeeTime) -> int:
     return max(1, min(4, slot.available_spots))
 
@@ -168,14 +191,14 @@ class Budget:
             return None
         if not should_autobook(cfg, self.runner_account_email):
             return None
-        # Drop slots that tee off too soon — the user needs lead time to make
-        # the round, and the regular alert email still goes out so they can
-        # decide whether to book manually.
-        eligible = [t for t in new_times if far_enough_out(t)]
+        # Drop slots that tee off too soon (lead-time) or that fall in the
+        # advanced-booking-fee window (≥8 days out). Alerts still go out for
+        # both — only the automated booking is suppressed.
+        eligible = [t for t in new_times if far_enough_out(t) and not has_advanced_fee(t)]
         skipped = len(new_times) - len(eligible)
         if skipped:
             log.info(
-                "[%s] autobook: skipping %d slot(s) within %dh of now",
+                "[%s] autobook: skipping %d slot(s) (lead time <%dh or in advanced-fee window)",
                 cfg.get("name") or cfg.get("id"), skipped, MIN_LEAD_TIME_SEC // 3600,
             )
         slot = pick_slot(eligible)
