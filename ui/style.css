@@ -414,6 +414,29 @@ main {
   font-size: 13.5px;
   border-bottom: none;
 }
+.match-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.match-row .match-link { flex: 1 1 auto; min-width: 0; }
+.match-book-btn {
+  flex: 0 0 auto;
+  background: var(--accent, #c9a96a);
+  color: #fff;
+  border: 0;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.match-book-btn:hover { background: var(--accent-deep, #b45309); }
+.match-book-btn:disabled { opacity: 0.6; cursor: default; }
+
 .match-link {
   display: flex;
   flex-direction: column;

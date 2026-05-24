@@ -36,6 +36,7 @@ def run_check_set(
     worker_url: str | None = None,
     unsubscribe_secret: str | None = None,
     autobook_budget: autobook.Budget | None = None,
+    autobook_account_email: str | None = None,
 ) -> list[TeeTime]:
     """Run one config to completion. Caller handles exception isolation.
 
@@ -119,6 +120,7 @@ def run_check_set(
             config_id=cfg.get("id"),
             worker_url=worker_url,
             unsubscribe_secret=unsubscribe_secret,
+            autobook_account_email=autobook_account_email,
         )
 
     # Autobook runs after the regular digest so the owner gets both:
