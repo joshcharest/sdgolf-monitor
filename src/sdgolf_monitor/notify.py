@@ -42,13 +42,15 @@ def _unsubscribe_url(worker_url: str | None, secret: str | None, email: str, con
     return f"{worker_url.rstrip('/')}/api/unsubscribe?t={token}"
 
 
-# Course name -> ForeUp teesheet (schedule) id. Used to construct booking
-# deep-links per match. Mirrors ui/schema.js TEESHEETS. Keep in sync.
-_TEESHEET_IDS = {
-    "Balboa Park 18":     1470,
-    "Balboa Park 9":      1490,
-    "Torrey Pines North": 1468,
-    "Torrey Pines South": 1487,
+# Course name -> (ForeUp facility id, teesheet/schedule id). Used to construct
+# booking deep-links per match. The facility id in the URL path determines
+# which course the SPA loads — using Balboa's (19348) for a Torrey schedule
+# lands the user on Balboa. Mirrors ui/schema.js TEESHEETS. Keep in sync.
+_COURSE_IDS = {
+    "Balboa Park 18":     (19348, 1470),
+    "Balboa Park 9":      (19348, 1490),
+    "Torrey Pines North": (19347, 1468),
+    "Torrey Pines South": (19347, 1487),
 }
 
 
@@ -59,16 +61,17 @@ def _booking_url(target: str, date_iso: str) -> str | None:
     based on the slot's date, not the API's booking_fee flag (which is
     unreliable for Torrey under 929).
     """
-    ts_id = _TEESHEET_IDS.get(target)
-    if not ts_id:
+    ids = _COURSE_IDS.get(target)
+    if not ids:
         return None
+    facility_id, ts_id = ids
     try:
         slot = date.fromisoformat(date_iso)
         is_advanced = (slot - date.today()).days >= 8
     except ValueError:
         return None
     booking_class = 51735 if is_advanced else 929
-    base = f"https://foreupsoftware.com/index.php/booking/19348/{booking_class}"
+    base = f"https://foreupsoftware.com/index.php/booking/{facility_id}/{booking_class}"
     parts = date_iso.split("-")
     y, mo, d = parts
     return f"{base}?date={mo}-{d}-{y}&schedule_id={ts_id}#/teetimes"
@@ -134,6 +137,83 @@ def _fmt_date(spec: str) -> str:
         return f"{d.strftime('%a')} {d.month}/{d.day}"
     except ValueError:
         return spec
+
+
+def send_autobook_email(
+    *,
+    smtp_user: str,
+    smtp_password: str,
+    to_addr: str,
+    set_name: str,
+    slot: TeeTime,
+    players: int,
+    dry_run: bool = True,
+) -> None:
+    """Email the owner that an auto-book fired for a single slot.
+
+    Currently always dry-run — the body says "would book" and includes the
+    booking URL so the owner can finish manually if they want. When real
+    booking is wired up, ``dry_run=False`` should swap to a "booked" subject
+    + confirmation number.
+    """
+    prefix = "AUTO-BOOK (dry run)" if dry_run else "AUTO-BOOK"
+    msg = EmailMessage()
+    msg["From"] = smtp_user
+    msg["To"] = to_addr
+    msg["Subject"] = (
+        f"[sdgolf:{set_name}] {prefix} — {_fmt_date(slot.date)} {_fmt_12h(slot.time)} {slot.target}"
+    )
+    msg.set_content(_autobook_plaintext(set_name, slot, players, dry_run=dry_run))
+    msg.add_alternative(_autobook_html(set_name, slot, players, dry_run=dry_run), subtype="html")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
+        smtp.login(smtp_user, smtp_password)
+        smtp.send_message(msg, to_addrs=[to_addr])
+
+
+def _autobook_plaintext(set_name: str, slot: TeeTime, players: int, *, dry_run: bool) -> str:
+    verb = "Would have booked" if dry_run else "Booked"
+    fee = _fee_text(slot.target, slot.green_fee, slot.date)
+    url = _booking_url(slot.target, slot.date) or "(no booking URL)"
+    return "\n".join([
+        f"{verb} this slot for subscription \"{set_name}\":",
+        "",
+        f"  {_fmt_date(slot.date)}  {_fmt_12h(slot.time)}  {slot.target}",
+        f"  {players} player(s)  {slot.holes}  {fee}",
+        "",
+        f"Book: {url}",
+        "",
+        (
+            "(Dry-run mode: no booking was actually placed. The real ForeUp POST "
+            "isn't wired up yet — click the link above to finish booking manually.)"
+            if dry_run else
+            ""
+        ),
+    ]).rstrip() + "\n"
+
+
+def _autobook_html(set_name: str, slot: TeeTime, players: int, *, dry_run: bool) -> str:
+    verb = "Would have booked" if dry_run else "Booked"
+    fee = _fee_text(slot.target, slot.green_fee, slot.date)
+    url = _booking_url(slot.target, slot.date)
+    when = f"{_fmt_date(slot.date)} {_fmt_12h(slot.time)}"
+    link = (
+        f'<a href="{html_escape(url, quote=True)}">Open in ForeUp</a>'
+        if url else "(no booking URL)"
+    )
+    body = [
+        f"<p>{html_escape(verb)} this slot for subscription <strong>{html_escape(set_name)}</strong>:</p>",
+        f"<p style='font-family:monospace'>{html_escape(when)} &middot; "
+        f"{html_escape(slot.target)} &middot; {players} player(s) &middot; "
+        f"{slot.holes} holes &middot; {html_escape(fee)}</p>",
+        f"<p>{link}</p>",
+    ]
+    if dry_run:
+        body.append(
+            "<p style='color:#666;font-size:12px'>Dry-run mode: no booking was "
+            "actually placed. The real ForeUp POST isn't wired up yet — click "
+            "the link above to finish booking manually.</p>"
+        )
+    return "<div style='font-family:sans-serif'>" + "".join(body) + "</div>"
 
 
 def send_bug_report(

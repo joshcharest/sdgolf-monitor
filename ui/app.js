@@ -283,6 +283,10 @@ function renderCard(cfg, snapshotEntry) {
   const enabled = cfg.enabled !== false;
   if (!enabled) article.classList.add("disabled");
 
+  if (cfg.autobook?.enabled) {
+    article.querySelector(".card-autobook-badge").hidden = false;
+  }
+
   const isOwner = cfg.owner === USER.email;
   const editBtn = article.querySelector(".edit-btn");
   const subscribeBtn = article.querySelector(".subscribe-btn");
@@ -478,7 +482,8 @@ function buildTimeLi(m) {
 function bookingUrl(m) {
   const ts = TEESHEETS.find(t => t.label === m.target);
   const bookingClass = m.booking_fee ? 51735 : 929;
-  const base = `https://foreupsoftware.com/index.php/booking/19348/${bookingClass}`;
+  const facility = ts?.facility ?? 19348;
+  const base = `https://foreupsoftware.com/index.php/booking/${facility}/${bookingClass}`;
   if (!ts || !/^\d{4}-\d{2}-\d{2}$/.test(m.date)) return `${base}#/teetimes`;
   const [y, mo, d] = m.date.split("-");
   return `${base}?date=${mo}-${d}-${y}&schedule_id=${ts.id}#/teetimes`;
@@ -603,6 +608,12 @@ function renderEdit(existingId) {
   document.getElementById("add-window").addEventListener("click", () => {
     windowsList.appendChild(buildWindowRow({ start: "07:00", end: "11:00", weekdays: [] }));
   });
+
+  if (USER?.is_admin) {
+    const ab = document.getElementById("autobook-fieldset");
+    ab.hidden = false;
+    form.elements["autobook-enabled"].checked = Boolean(cfg.autobook?.enabled);
+  }
 
   document.getElementById("cancel-btn").addEventListener("click", () => renderList());
 
@@ -754,7 +765,7 @@ function readForm(form) {
   const name = form.elements["name"].value.trim();
   if (!name) throw new Error("Name is required");
 
-  return {
+  const out = {
     name,
     enabled: form.elements["enabled"].checked,
     targets,
@@ -765,6 +776,13 @@ function readForm(form) {
       windows,
     },
   };
+  // Only admins see the fieldset, so only admins can submit a value. The
+  // worker also enforces this on the server, so a tampered request still
+  // won't persist autobook for non-admins.
+  if (USER?.is_admin) {
+    out.autobook = { enabled: form.elements["autobook-enabled"].checked };
+  }
+  return out;
 }
 
 function readHoles(form) {

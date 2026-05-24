@@ -321,13 +321,15 @@ async function handleCreateConfig(request, env) {
   if (err) return json({ error: err }, 400);
   const id = `${slugify(body.name)}-${randomIdSuffix()}`;
   const now = new Date().toISOString();
+  // Owner == session.email at create time; admin status of the session controls
+  // whether the autobook field on the body is honored.
   const config = buildConfig({}, body, {
     id,
     owner: session.email,
     subscribers: [],
     created_at: now,
     updated_at: now,
-  });
+  }, { allowAutobook: isAdminSession(session, env) });
   await env.SNAPSHOT_KV.put(`config:${id}`, JSON.stringify(config));
   await indexAdd(env, "configs_index", "config:", id);
   await stampPendingConfirmation(env, "create", session.email, id);
@@ -349,7 +351,7 @@ async function handleUpdateConfig(request, env, id) {
     subscribers: existing.subscribers || [],          // can't edit subscribers via PUT
     created_at: existing.created_at,
     updated_at: new Date().toISOString(),
-  });
+  }, { allowAutobook: isAdminSession(session, env) });
   await env.SNAPSHOT_KV.put(`config:${id}`, JSON.stringify(updated));
   return json(updated);
 }
@@ -657,8 +659,15 @@ async function indexRemove(env, indexKey, listPrefix, id) {
   await env.SNAPSHOT_KV.put(indexKey, JSON.stringify(next));
 }
 
-function buildConfig(existing, body, overrides) {
-  return {
+function buildConfig(existing, body, overrides, { allowAutobook = false } = {}) {
+  // Autobook commits real money on the runner's shared ForeUp account, so the
+  // field is admin-only at write time. Non-admin writes silently drop it (they
+  // can't see the control either). An existing value is preserved across an
+  // admin's edits but cannot be introduced by a non-admin.
+  const autobook = allowAutobook
+    ? normalizeAutobook(body.autobook, existing.autobook)
+    : (existing.autobook || undefined);
+  const out = {
     name: typeof body.name === "string" ? body.name : existing.name,
     enabled: body.enabled !== undefined ? Boolean(body.enabled) : (existing.enabled ?? true),
     targets: Array.isArray(body.targets) ? body.targets : (existing.targets || []),
@@ -666,6 +675,16 @@ function buildConfig(existing, body, overrides) {
     filter: body.filter && typeof body.filter === "object" ? body.filter : (existing.filter || {}),
     ...overrides,
   };
+  if (autobook) out.autobook = autobook;
+  return out;
+}
+
+function normalizeAutobook(incoming, existing) {
+  // Single source of truth for the autobook schema. Currently just `enabled`;
+  // future fields (max_players, cart, etc.) land here.
+  const src = (incoming && typeof incoming === "object") ? incoming : existing;
+  if (!src) return undefined;
+  return { enabled: Boolean(src.enabled) };
 }
 
 function validateConfigPayload(body) {

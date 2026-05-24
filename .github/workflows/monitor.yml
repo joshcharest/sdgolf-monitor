@@ -44,6 +44,10 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           WORKER_URL: https://sdgolf-monitor.joshcharest1.workers.dev
           RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+          # App-side email whose configs are allowed to autobook on the
+          # shared ForeUp account. Restricts autobook to sets you own so a
+          # subscriber can't trigger a charge on your card.
+          AUTOBOOK_OWNER_EMAIL: sdgolfmonitor@gmail.com
         run: python -m sdgolf_monitor.main --snapshot-path snapshot.json
 
       - name: Save state cache

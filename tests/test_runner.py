@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from sdgolf_monitor import main as main_mod
+from sdgolf_monitor import autobook, main as main_mod
 from sdgolf_monitor import runner
 from sdgolf_monitor.client import TeeTime
 
@@ -159,6 +159,114 @@ def test_no_configs_returns_zero(tmp_path, monkeypatch, caplog):
     rc = main_mod.main(tmp_path / "state", configs=[], dry_run=True)
     assert rc == 0
     assert "no check sets returned" in caplog.text
+
+
+def test_autobook_fires_for_owner_and_caps_at_one_per_day(tmp_path, monkeypatch):
+    """Owner's autobook fires once; second config that day is skipped by the cap."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    cfg_a = _config("alpha", ["A"], owner="owner@example.com")
+    cfg_a["autobook"] = {"enabled": True}
+    cfg_b = _config("beta", ["B"], owner="owner@example.com")
+    cfg_b["autobook"] = {"enabled": True}
+
+    rows_a = [{"date": "2026-06-01", "time": "08:00", "spots": 3}]
+    rows_b = [{"date": "2026-06-02", "time": "09:00", "spots": 4}]
+    client = StubClient(by_target={"A": rows_a, "B": rows_b})
+
+    monkeypatch.setattr(runner.notify, "send_email", lambda **kw: None)
+    autobook_calls: list[dict] = []
+    monkeypatch.setattr(runner.notify, "send_autobook_email",
+                        lambda **kw: autobook_calls.append(kw))
+
+    budget = autobook.Budget({"date": "", "slots": []}, "owner@example.com")
+    smtp = runner.SmtpCreds(user="u", password="p")
+    runner.run_check_set(client=client, cfg=cfg_a, state_path=state_dir / "alpha.json",
+                         set_name="alpha", dry_run=False, smtp=smtp,
+                         autobook_budget=budget)
+    runner.run_check_set(client=client, cfg=cfg_b, state_path=state_dir / "beta.json",
+                         set_name="beta", dry_run=False, smtp=smtp,
+                         autobook_budget=budget)
+
+    assert len(autobook_calls) == 1
+    assert autobook_calls[0]["set_name"] == "alpha"
+    assert autobook_calls[0]["slot"].target == "A"
+    assert autobook_calls[0]["players"] == 3
+    assert budget.available() is False
+
+
+def test_autobook_skips_slot_within_lead_time(tmp_path, monkeypatch):
+    """A near-term slot is filtered out; the next-earliest eligible one wins."""
+    from datetime import datetime, timezone
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    cfg = _config("alpha", ["A"], owner="owner@example.com")
+    cfg["autobook"] = {"enabled": True}
+
+    # Freeze "now" to 2026-06-01 14:00 UTC (= 07:00 Pacific) so we control
+    # the 3-hour lead-time window deterministically.
+    fake_now = datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(autobook, "datetime", _FakeDatetime(fake_now))
+
+    # 08:00 Pacific = +1h from now (too soon), 11:00 Pacific = +4h (eligible).
+    rows = [
+        {"date": "2026-06-01", "time": "08:00"},
+        {"date": "2026-06-01", "time": "11:00"},
+    ]
+    client = StubClient(by_target={"A": rows})
+
+    monkeypatch.setattr(runner.notify, "send_email", lambda **kw: None)
+    autobook_calls: list[dict] = []
+    monkeypatch.setattr(runner.notify, "send_autobook_email",
+                        lambda **kw: autobook_calls.append(kw))
+
+    budget = autobook.Budget({"date": "", "slots": []}, "owner@example.com")
+    smtp = runner.SmtpCreds(user="u", password="p")
+    runner.run_check_set(client=client, cfg=cfg, state_path=state_dir / "alpha.json",
+                         set_name="alpha", dry_run=False, smtp=smtp,
+                         autobook_budget=budget)
+
+    assert len(autobook_calls) == 1
+    assert autobook_calls[0]["slot"].time == "11:00"
+
+
+class _FakeDatetime:
+    """Patch target for autobook.datetime so we can freeze datetime.now()."""
+    def __init__(self, now):
+        self._now = now
+    def __call__(self, *a, **kw):
+        from datetime import datetime as real
+        return real(*a, **kw)
+    def now(self, tz=None):
+        return self._now if tz is None else self._now.astimezone(tz)
+    def fromisoformat(self, s):
+        from datetime import datetime as real
+        return real.fromisoformat(s)
+
+
+def test_autobook_skips_when_owner_isnt_runner_account(tmp_path, monkeypatch):
+    """Subscriber-owned configs must NOT autobook on the runner's account."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    cfg = _config("alpha", ["A"], owner="someone-else@example.com")
+    cfg["autobook"] = {"enabled": True}
+
+    rows = [{"date": "2026-06-01", "time": "08:00"}]
+    client = StubClient(by_target={"A": rows})
+
+    monkeypatch.setattr(runner.notify, "send_email", lambda **kw: None)
+    autobook_calls: list[dict] = []
+    monkeypatch.setattr(runner.notify, "send_autobook_email",
+                        lambda **kw: autobook_calls.append(kw))
+
+    budget = autobook.Budget({"date": "", "slots": []}, "runner@example.com")
+    smtp = runner.SmtpCreds(user="u", password="p")
+    runner.run_check_set(client=client, cfg=cfg, state_path=state_dir / "alpha.json",
+                         set_name="alpha", dry_run=False, smtp=smtp,
+                         autobook_budget=budget)
+
+    assert autobook_calls == []
+    assert budget.available() is True
 
 
 def test_snapshot_records_matches_disabled_and_errors(tmp_path, monkeypatch):

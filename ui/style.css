@@ -245,7 +245,7 @@ main {
   border: none;
   background: none;
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto;
   align-items: center;
   gap: 8px 10px;
   position: static;
@@ -268,6 +268,19 @@ main {
 
 .check-card .card-desc { display: none; }
 .check-card footer { display: none; }
+
+.check-card .card-autobook-badge {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-deep, #b45309);
+  border: 1px solid var(--accent-deep, #b45309);
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  justify-self: start;
+}
 
 .check-card ul.card-meta {
   list-style: none; padding: 0; margin: 0;
