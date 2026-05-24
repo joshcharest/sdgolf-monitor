@@ -283,7 +283,29 @@ function renderCard(cfg, snapshotEntry) {
   const enabled = cfg.enabled !== false;
   if (!enabled) article.classList.add("disabled");
 
-  if (cfg.autobook?.enabled) {
+  // Admin+owner gets an inline toggle; everyone else sees the read-only badge
+  // when autobook is on. The toggle and badge are mutually exclusive — the
+  // toggle conveys state too, so showing both would be redundant noise.
+  const canControlAutobook = USER?.is_admin && cfg.owner === USER.email;
+  if (canControlAutobook) {
+    const abToggleLabel = article.querySelector(".autobook-toggle");
+    const abToggle = article.querySelector(".autobook-toggle-input");
+    abToggleLabel.hidden = false;
+    abToggle.checked = Boolean(cfg.autobook?.enabled);
+    abToggle.addEventListener("change", async () => {
+      const cached = CACHE.get(cfg.id);
+      if (!cached) return;
+      const next = { ...cached, autobook: { enabled: abToggle.checked } };
+      try {
+        const saved = await apiUpdateConfig(cfg.id, next);
+        CACHE.set(cfg.id, saved);
+        toast(`${cfg.name}: auto-book ${abToggle.checked ? "on" : "off"}`);
+      } catch (e) {
+        abToggle.checked = !abToggle.checked;  // revert
+        toast(`Could not toggle auto-book: ${e.message}`, "error");
+      }
+    });
+  } else if (cfg.autobook?.enabled) {
     article.querySelector(".card-autobook-badge").hidden = false;
   }
 
