@@ -3,11 +3,15 @@
 // When new SD City Golf courses come online (e.g. Mission Bay), add them
 // here. The UI and any auto-completion logic both read from this file.
 
+// `facility` is the ForeUp course/facility id used in the booking URL path
+// (/booking/{facility}/...). Balboa = 19348, Torrey = 19347. Sharing one
+// facility id across courses lands the user on the wrong course's SPA, so
+// keep these aligned with the teesheet.
 export const TEESHEETS = [
-  { id: 1470, label: "Balboa Park 18" },
-  { id: 1490, label: "Balboa Park 9" },
-  { id: 1468, label: "Torrey Pines North" },
-  { id: 1487, label: "Torrey Pines South" },
+  { id: 1470, label: "Balboa Park 18",     facility: 19348 },
+  { id: 1490, label: "Balboa Park 9",      facility: 19348 },
+  { id: 1468, label: "Torrey Pines North", facility: 19347 },
+  { id: 1487, label: "Torrey Pines South", facility: 19347 },
 ];
 
 // Booking classes the user (Josh) is entitled to. Discovered via discover.py.

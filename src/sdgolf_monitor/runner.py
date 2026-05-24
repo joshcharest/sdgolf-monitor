@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import notify, state
+from . import autobook, notify, state
 from .client import ForeUpClient, Target, TeeTime
 from .filter import Filter, Window, date_range, parse_hhmm, parse_holes, parse_weekdays
 
@@ -35,6 +35,7 @@ def run_check_set(
     recipients_override: list[str] | None = None,
     worker_url: str | None = None,
     unsubscribe_secret: str | None = None,
+    autobook_budget: autobook.Budget | None = None,
 ) -> list[TeeTime]:
     """Run one config to completion. Caller handles exception isolation.
 
@@ -119,6 +120,32 @@ def run_check_set(
             worker_url=worker_url,
             unsubscribe_secret=unsubscribe_secret,
         )
+
+    # Autobook runs after the regular digest so the owner gets both:
+    # (a) the full new-matches list, and (b) a separate "AUTO-BOOK" mail
+    # for the one slot we acted on. Currently dry-run — see autobook.py.
+    if autobook_budget is not None:
+        decision = autobook_budget.consider(cfg, new)
+        if decision is not None:
+            log.info(
+                "[%s] AUTO-BOOK (dry run): would book %s on %s at %s for %d player(s)",
+                set_name, decision.slot.target, decision.slot.date,
+                decision.slot.time, decision.players,
+            )
+            try:
+                notify.send_autobook_email(
+                    smtp_user=smtp.user,
+                    smtp_password=smtp.password,
+                    to_addr=decision.owner,
+                    set_name=set_name,
+                    slot=decision.slot,
+                    players=decision.players,
+                    dry_run=True,
+                )
+                autobook_budget.record(decision)
+            except Exception:
+                log.exception("[%s] failed to send autobook email; will retry on next tick", set_name)
+
     state.save(state_path, seen)
     return matches
 

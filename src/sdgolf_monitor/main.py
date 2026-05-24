@@ -20,7 +20,7 @@ from typing import Any
 
 import requests
 
-from . import notify
+from . import autobook, notify
 from .client import ForeUpClient, TeeTime
 from .runner import SmtpCreds, recipients_for, run_check_set
 
@@ -40,6 +40,7 @@ def main(
     admin_emails: list[str] | None = None,
     worker_url: str | None = None,
     unsubscribe_secret: str | None = None,
+    autobook_account_email: str | None = None,
 ) -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -79,6 +80,15 @@ def main(
 
     snapshot: dict[str, dict] = {}
     state_dir.mkdir(parents=True, exist_ok=True)
+
+    # Autobook budget is shared across all check sets in this tick so the
+    # daily cap (1 attempt/day) holds globally. Loaded once, saved once.
+    autobook_state_path = state_dir / "autobook.json"
+    autobook_budget: autobook.Budget | None = None
+    if autobook_account_email and not dry_run:
+        autobook_state = autobook.prune_future(autobook.load_state(autobook_state_path))
+        autobook_budget = autobook.Budget(autobook_state, autobook_account_email)
+
     for cfg in configs:
         config_id = cfg.get("id") or cfg.get("name") or "<unnamed>"
         set_name = cfg.get("name") or config_id
@@ -110,6 +120,7 @@ def main(
                 recipients_override=recipients_override,
                 worker_url=worker_url,
                 unsubscribe_secret=unsubscribe_secret,
+                autobook_budget=autobook_budget,
             )
             snapshot[config_id] = {
                 **common,
@@ -173,6 +184,9 @@ def main(
                 continue
             if bug_consume:
                 bug_consume(b["key"])
+
+    if autobook_budget is not None:
+        autobook.save_state(autobook_state_path, autobook_budget.snapshot())
 
     if snapshot_path:
         _write_snapshot(snapshot_path, snapshot)
@@ -285,6 +299,10 @@ def cli() -> int:
     admin_emails = [
         e.strip() for e in os.environ.get("ADMIN_EMAILS", "joshcharest1@gmail.com").split(",") if e.strip()
     ]
+    # The app-side email of whichever user "owns" the runner's ForeUp account
+    # (i.e. would be charged if autobook books a slot). Autobook is restricted
+    # to configs where cfg.owner matches this address. Unset = autobook off.
+    autobook_account_email = os.environ.get("AUTOBOOK_OWNER_EMAIL", "").strip() or None
 
     return main(
         args.state_dir,
@@ -298,6 +316,7 @@ def cli() -> int:
         admin_emails=admin_emails,
         worker_url=worker_url,
         unsubscribe_secret=runner_secret,
+        autobook_account_email=autobook_account_email,
     )
 
 
