@@ -90,15 +90,11 @@
         <span class="card-matches-summary"></span>
         <button type="button" class="edit-btn" hidden>Edit</button>
         <button type="button" class="subscribe-btn" hidden></button>
-        <label class="toggle autobook-toggle" hidden title="Auto-book the first matching slot (dry run)">
-          <small class="autobook-caption">auto</small>
-          <input type="checkbox" class="autobook-toggle-input" />
-          <span></span>
-        </label>
-        <label class="toggle" hidden>
-          <input type="checkbox" class="enabled-toggle" />
-          <span></span>
-        </label>
+        <div class="card-mode" hidden role="group" aria-label="Subscription mode">
+          <button type="button" class="seg" data-mode="off">Off</button>
+          <button type="button" class="seg" data-mode="alert">Alert</button>
+          <button type="button" class="seg seg-auto" data-mode="auto" hidden title="Auto-book the first matching slot (dry run)">Auto</button>
+        </div>
       </header>
       <p class="card-owner"></p>
       <ul class="card-meta">
