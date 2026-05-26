@@ -138,22 +138,25 @@ def _resident_rate(target: str, non_resident: float | None) -> float | None:
     return _RATE_MAP.get(target, {}).get(non_resident)
 
 
-def _has_advanced_fee(date_iso: str) -> bool:
-    try:
-        slot = date.fromisoformat(date_iso)
-        return (slot - date.today()).days >= 8
-    except ValueError:
-        return False
+def _has_advanced_fee(booking_fee: float | None) -> bool:
+    """Whether ForeUp said this slot charges the Advanced Booking Fee.
+
+    Reads the per-slot flag (populated from ``booking_fee_required`` in the
+    API response) so the display matches the booking class ForeUp would
+    actually use — including the daily 7pm release boundary, where a slot's
+    fee/no-fee status flips between runner ticks.
+    """
+    return bool(booking_fee)
 
 
 def _fmt_money(amount: float) -> str:
     return f"${amount:g}" if amount == int(amount) else f"${amount:.2f}"
 
 
-def _fee_text(target: str, non_resident: float | None, date_iso: str) -> str:
+def _fee_text(target: str, non_resident: float | None, booking_fee: float | None) -> str:
     rate = _resident_rate(target, non_resident)
     base = _fmt_money(rate) if rate is not None else "?"
-    if not _has_advanced_fee(date_iso):
+    if not _has_advanced_fee(booking_fee):
         return base
     abf = _ADVANCED_BOOKING_FEE.get(target)
     return f"{base} + ${abf} Advanced Booking Fee" if abf is not None else f"{base} + Advanced Booking Fee"
@@ -200,7 +203,7 @@ def send_autobook_email(
 
 def _autobook_plaintext(set_name: str, slot: TeeTime, players: int, *, dry_run: bool) -> str:
     verb = "Would have booked" if dry_run else "Booked"
-    fee = _fee_text(slot.target, slot.green_fee, slot.date)
+    fee = _fee_text(slot.target, slot.green_fee, slot.booking_fee)
     url = _booking_url(slot.target, slot.date) or "(no booking URL)"
     return "\n".join([
         f"{verb} this slot for subscription \"{set_name}\":",
@@ -221,7 +224,7 @@ def _autobook_plaintext(set_name: str, slot: TeeTime, players: int, *, dry_run: 
 
 def _autobook_html(set_name: str, slot: TeeTime, players: int, *, dry_run: bool) -> str:
     verb = "Would have booked" if dry_run else "Booked"
-    fee = _fee_text(slot.target, slot.green_fee, slot.date)
+    fee = _fee_text(slot.target, slot.green_fee, slot.booking_fee)
     url = _booking_url(slot.target, slot.date)
     when = f"{_fmt_date(slot.date)} {_fmt_12h(slot.time)}"
     link = (
@@ -402,7 +405,7 @@ def _confirmation_plaintext(verb: str, cfg: dict, matches: list[dict], *, unsubs
                 f"  {_fmt_date(m.get('date', '?'))}  {_fmt_12h(m.get('time', '?'))}  "
                 f"{m.get('target', '?')}  {m.get('available_spots', '?')} spots  "
                 f"{m.get('holes', '?')}  "
-                f"{_fee_text(m.get('target', ''), m.get('green_fee'), m.get('date', ''))}"
+                f"{_fee_text(m.get('target', ''), m.get('green_fee'), m.get('booking_fee'))}"
             )
             lines.append(line)
             url = _booking_url(m.get("target", ""), m.get("date", ""))
@@ -585,7 +588,7 @@ def _plaintext(
         lines.append(
             f"  {_fmt_date(tt.date)}  {_fmt_12h(tt.time)}  {tt.target}  "
             f"{tt.available_spots} spots  {tt.holes}  "
-            f"{_fee_text(tt.target, tt.green_fee, tt.date)}"
+            f"{_fee_text(tt.target, tt.green_fee, tt.booking_fee)}"
         )
         url = _booking_url(tt.target, tt.date)
         if url:
@@ -610,7 +613,7 @@ def _html(
     rows = []
     show_book_col = bool(book_urls) and any(book_urls.values())
     for tt in sorted(new_times, key=lambda t: (t.date, t.time, t.target)):
-        fee_text = _fee_text(tt.target, tt.green_fee, tt.date)
+        fee_text = _fee_text(tt.target, tt.green_fee, tt.booking_fee)
         time_str = _fmt_12h(tt.time)
         url = _booking_url(tt.target, tt.date)
         time_cell = (
