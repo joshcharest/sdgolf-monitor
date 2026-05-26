@@ -72,6 +72,10 @@
 
   <template id="list-view">
     <section id="list-section">
+      <section id="bookings-section" hidden>
+        <h2 class="bookings-title">Your bookings <span class="bookings-count"></span></h2>
+        <ul class="bookings-list"></ul>
+      </section>
       <div class="list-tabs">
         <button type="button" class="list-tab active" data-filter="mine">My subscriptions</button>
         <button type="button" class="list-tab" data-filter="others">Other subscriptions</button>
