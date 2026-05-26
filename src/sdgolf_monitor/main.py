@@ -190,7 +190,8 @@ def main(
         autobook.save_state(autobook_state_path, autobook_budget.snapshot())
 
     if snapshot_path:
-        _write_snapshot(snapshot_path, snapshot)
+        reservations = _extract_reservations(client.user or {})
+        _write_snapshot(snapshot_path, snapshot, reservations)
 
     return 0
 
@@ -247,6 +248,68 @@ def consume_bug(worker_url: str, runner_secret: str, key: str) -> None:
         resp.raise_for_status()
 
 
+# Teesheet id -> the human label used elsewhere in the app. Mirrors
+# ui/schema.js TEESHEETS — keep in sync. Used to swap ForeUp's verbose
+# "Balboa Park 18 hole" / "Torrey Pines - North" naming for the short label.
+_TEESHEET_LABELS = {
+    1470: "Balboa Park 18",
+    1490: "Balboa Park 9",
+    1468: "Torrey Pines North",
+    1487: "Torrey Pines South",
+}
+
+
+def _extract_reservations(user: dict[str, Any]) -> list[dict]:
+    """Pull upcoming reservations out of the ForeUp login response.
+
+    The /api/booking/users/login endpoint already returns a `reservations`
+    array attached to the user object, so this is free — no extra HTTP call.
+    Filters out cancelled and past reservations, normalizes the fields the
+    UI cares about, and sorts by start time ascending.
+    """
+    raw = user.get("reservations") or []
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    now = datetime.now()  # ForeUp times are course-local; local-naive compare is fine
+    for r in raw:
+        if not isinstance(r, dict):
+            continue
+        if r.get("date_cancelled") and r.get("date_cancelled") != "0000-00-00 00:00:00":
+            continue
+        start_str = r.get("start_datetime") or r.get("time") or ""
+        try:
+            start_dt = datetime.fromisoformat(start_str.replace(" ", "T"))
+        except ValueError:
+            continue
+        if start_dt < now:
+            continue
+        try:
+            ts_id = int(r.get("teesheet_id"))
+        except (TypeError, ValueError):
+            ts_id = None
+        try:
+            holes = int(r.get("holes") or 18)
+        except ValueError:
+            holes = 18
+        try:
+            players = int(r.get("player_count") or 0)
+        except ValueError:
+            players = 0
+        out.append({
+            "id": r.get("TTID") or r.get("teetime_id"),
+            "course": _TEESHEET_LABELS.get(ts_id) or r.get("teesheet_title") or "?",
+            "teesheet_id": ts_id,
+            "date": start_dt.strftime("%Y-%m-%d"),
+            "time": start_dt.strftime("%H:%M"),
+            "holes": holes,
+            "players": players,
+            "title": r.get("title") or "",
+        })
+    out.sort(key=lambda x: (x["date"], x["time"]))
+    return out
+
+
 def _match_dict(tt: TeeTime) -> dict:
     return {
         "target": tt.target,
@@ -259,12 +322,14 @@ def _match_dict(tt: TeeTime) -> dict:
     }
 
 
-def _write_snapshot(path: Path, sets: dict[str, dict]) -> None:
+def _write_snapshot(path: Path, sets: dict[str, dict], reservations: list[dict] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
+    payload: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sets": sets,
     }
+    if reservations:
+        payload["reservations"] = reservations
     path.write_text(json.dumps(payload, indent=2) + "\n")
 
 

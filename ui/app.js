@@ -192,6 +192,7 @@ async function renderList() {
 
   const snapshot = await loadSnapshot();
   renderSnapshotMeta(snapshot);
+  renderBookings(snapshot?.reservations);
   const setsById = snapshot?.sets || {};
 
   for (const cfg of configs) CACHE.set(cfg.id, cfg);
@@ -246,6 +247,34 @@ async function loadSnapshot() {
   } catch {
     return null;
   }
+}
+
+// Upcoming bookings come from the runner's authenticated ForeUp session, so
+// they only apply to whichever account the runner logs in as. Show them
+// only to admins — non-admin viewers would see someone else's tee times
+// and that'd be confusing.
+function renderBookings(reservations) {
+  const section = document.getElementById("bookings-section");
+  if (!section) return;
+  const list = section.querySelector(".bookings-list");
+  const count = section.querySelector(".bookings-count");
+  list.innerHTML = "";
+  if (!USER?.is_admin || !Array.isArray(reservations) || reservations.length === 0) {
+    section.hidden = true;
+    return;
+  }
+  count.textContent = `(${reservations.length})`;
+  for (const r of reservations) {
+    const li = document.createElement("li");
+    li.className = "booking-row";
+    li.append(
+      mkSpan("booking-when", `${formatDate(r.date)} · ${fmt12h(r.time)}`),
+      mkSpan("booking-course", r.course),
+      mkSpan("booking-meta", `${r.players}p · ${r.holes}h`),
+    );
+    list.appendChild(li);
+  }
+  section.hidden = false;
 }
 
 function renderSnapshotMeta(snapshot) {
