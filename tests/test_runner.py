@@ -301,24 +301,24 @@ def test_autobook_torrey_requires_49h_lead_time(tmp_path, monkeypatch):
     assert autobook_calls[0]["slot"].date == "2026-06-01"
 
 
-def test_autobook_skips_slot_in_advanced_fee_window(tmp_path, monkeypatch):
-    """A slot 7+ days out (Advanced Booking Fee territory) is skipped."""
+def test_autobook_skips_slot_with_advanced_fee(tmp_path, monkeypatch):
+    """A slot whose ForeUp booking_fee flag is truthy is skipped."""
     from datetime import date, datetime, timezone
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     cfg = _config("alpha", ["A"], owner="owner@example.com")
     cfg["autobook"] = {"enabled": True}
 
-    # Freeze "now" to 2026-06-01 16:00 UTC (09:00 Pacific) so today=2026-06-01.
     fake_now = datetime(2026, 6, 1, 16, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(autobook, "datetime", _FakeDatetime(fake_now))
     monkeypatch.setattr(autobook, "date", _FakeDate(date(2026, 6, 1)))
 
-    # 2026-06-07 = +6 days (still in no-fee window, eligible);
-    # 2026-06-08 = +7 days (advanced-fee window, must skip).
+    # The runner reads booking_fee from each slot directly — no calendar
+    # math involved — so we set it explicitly here. The first slot is in
+    # the fee window (skip); the second is no-fee (eligible).
     rows = [
-        {"date": "2026-06-08", "time": "08:00"},
-        {"date": "2026-06-07", "time": "08:00"},
+        {"date": "2026-06-08", "time": "08:00", "booking_fee": 32.0},
+        {"date": "2026-06-07", "time": "08:00", "booking_fee": None},
     ]
     client = StubClient(by_target={"A": rows})
 
@@ -335,6 +335,7 @@ def test_autobook_skips_slot_in_advanced_fee_window(tmp_path, monkeypatch):
 
     assert len(autobook_calls) == 1
     assert autobook_calls[0]["slot"].date == "2026-06-07"
+    assert autobook_calls[0]["slot"].booking_fee is None
 
 
 class _FakeDate:

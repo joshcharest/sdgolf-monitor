@@ -37,12 +37,10 @@ LEAD_TIME_SEC_BY_COURSE = {
 def lead_time_sec_for(target: str) -> int:
     return LEAD_TIME_SEC_BY_COURSE.get(target, DEFAULT_LEAD_TIME_SEC)
 
-# 7+ days out drops the slot into the resident 51735 booking class, which
-# carries the non-refundable Advanced Booking Fee ($10 Balboa, $32 Torrey).
-# Autobook stays inside the no-fee window — the one-click "Book" button is
+# Autobook avoids slots that would charge the non-refundable Advanced
+# Booking Fee ($10 Balboa, $32 Torrey). The one-click "Book" button is
 # unaffected because that's an explicit user action and the fee is visible
 # in the UI.
-ADVANCED_FEE_THRESHOLD_DAYS = 7
 
 _COURSE_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -122,20 +120,16 @@ def far_enough_out(slot: TeeTime, now: datetime | None = None) -> bool:
     return (slot_dt - current).total_seconds() >= lead_time_sec_for(slot.target)
 
 
-def has_advanced_fee(slot: TeeTime, today: date | None = None) -> bool:
+def has_advanced_fee(slot: TeeTime) -> bool:
     """True if booking this slot would incur the non-refundable booking fee.
 
-    Date-based (not the ForeUp ``booking_fee`` field) because Torrey's API
-    returns ``booking_fee_required=false`` for slots that DO charge the fee
-    under booking class 929. The 8-day cutoff is the resident class boundary.
+    Uses ForeUp's per-slot ``booking_fee`` (populated when the API response
+    has ``booking_fee_required=true``). This is the authoritative answer and
+    handles the daily 7pm release boundary automatically — a slot that's in
+    the fee class before the release moves to the no-fee class after, and we
+    just read whichever state ForeUp returns on the next runner tick.
     """
-    try:
-        slot_d = date.fromisoformat(slot.date)
-    except ValueError:
-        # Unparseable date: be conservative and treat as in-fee window.
-        return True
-    today = today or date.today()
-    return (slot_d - today).days >= ADVANCED_FEE_THRESHOLD_DAYS
+    return bool(slot.booking_fee)
 
 
 def players_for(slot: TeeTime) -> int:
