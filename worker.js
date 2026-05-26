@@ -30,6 +30,8 @@ export default {
     if (pathname === "/api/auth/login"  && method === "POST") return handleLogin(request, env);
     if (pathname === "/api/auth/logout" && method === "POST") return handleLogout();
     if (pathname === "/api/me"          && method === "GET")  return handleMe(request, env);
+    if (pathname === "/api/me/order"    && method === "GET")  return handleGetUserOrder(request, env);
+    if (pathname === "/api/me/order"    && method === "PUT")  return handlePutUserOrder(request, env);
 
     if (pathname === "/api/internal/configs" && method === "GET") return handleInternalConfigs(request, env);
     if (pathname === "/api/internal/pending" && method === "GET") return handleInternalPending(request, env);
@@ -273,6 +275,51 @@ async function handleMe(request, env) {
   const session = await getSession(request, env);
   if (!session) return json({ error: "not signed in" }, 401);
   return json({ email: session.email, is_admin: isAdminSession(session, env) });
+}
+
+// Per-user ordering of "My subscriptions" cards. Stored as a simple list of
+// config ids; the UI sorts owned configs by their position in this list and
+// alpha-sorts the rest after. We don't try to keep the list synchronized
+// with creates/deletes — missing ids just fall through to the alpha bucket,
+// and stale ids in the list are filtered on render.
+async function handleGetUserOrder(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const order = await readUserOrder(env, session.email);
+  return json({ order });
+}
+
+async function handlePutUserOrder(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const body = await safeJson(request);
+  if (!body || !Array.isArray(body.order)) return json({ error: "expected { order: [id, ...] }" }, 400);
+  // Defensive — bound the list size and validate id shape so a hostile or
+  // buggy client can't write garbage. Same regex the route matcher uses.
+  if (body.order.length > 200) return json({ error: "too many ids" }, 400);
+  const idRe = /^[a-z0-9-]{1,128}$/;
+  const cleaned = [];
+  const seen = new Set();
+  for (const id of body.order) {
+    if (typeof id !== "string" || !idRe.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    cleaned.push(id);
+  }
+  await env.SNAPSHOT_KV.put(userOrderKey(session.email), JSON.stringify(cleaned));
+  return json({ order: cleaned });
+}
+
+function userOrderKey(email) {
+  return `user_order:${String(email).toLowerCase()}`;
+}
+
+async function readUserOrder(env, email) {
+  const v = await env.SNAPSHOT_KV.get(userOrderKey(email));
+  if (!v) return [];
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed.filter(x => typeof x === "string") : [];
+  } catch { return []; }
 }
 
 function authSecretsReady(env) {

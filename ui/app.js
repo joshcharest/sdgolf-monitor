@@ -43,6 +43,7 @@ window.addEventListener("unhandledrejection", (e) => captureLog("unhandled-promi
 const CACHE = new Map();
 let USER = null;  // { email } once signed in
 let LIST_FILTER = "mine";  // "mine" | "others" — persists across renderList calls
+let USER_ORDER = [];       // per-user ordering for "mine" tab; refreshed in renderList
 let CURRENT_VIEW = "boot";  // updated on each render — included in bug reports
 
 // ----- Toast -------------------------------------------------------------
@@ -93,6 +94,8 @@ const apiAdminGetUsers  = ()             => api("GET",    "/api/admin/users");
 const apiAdminResetUser = (email)        => api("DELETE", `/api/admin/users/${encodeURIComponent(email)}`);
 const apiBugReport      = (payload)      => api("POST",   "/api/bug-report", payload);
 const apiBookNow        = (payload)      => api("POST",   "/api/book/now", payload);
+const apiGetUserOrder   = ()             => api("GET",    "/api/me/order");
+const apiPutUserOrder   = (order)        => api("PUT",    "/api/me/order", { order });
 
 // Fire-and-forget: tell the Worker to dispatch the monitor workflow right
 // now so the snapshot reflects this config mutation within ~30s instead of
@@ -195,6 +198,13 @@ async function renderList() {
   renderBookings(snapshot?.reservations);
   const setsById = snapshot?.sets || {};
 
+  // Load the user's preferred ordering; absent or stale ids fall through to
+  // the alpha bucket below in sortMine.
+  try {
+    const { order } = await apiGetUserOrder();
+    USER_ORDER = Array.isArray(order) ? order : [];
+  } catch { USER_ORDER = []; }
+
   for (const cfg of configs) CACHE.set(cfg.id, cfg);
 
   // Wire tabs once after the view is mounted.
@@ -220,13 +230,19 @@ function renderTabCards(configs, setsById) {
   mineTab.classList.toggle("active", LIST_FILTER === "mine");
   othersTab.classList.toggle("active", LIST_FILTER === "others");
 
-  const visible = (LIST_FILTER === "mine" ? mine : others)
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const visible = LIST_FILTER === "mine"
+    ? sortMine(mine)
+    : others.slice().sort((a, b) => a.name.localeCompare(b.name));
 
   const cardsEl = document.getElementById("cards");
   cardsEl.innerHTML = "";
   for (const cfg of visible) cardsEl.appendChild(renderCard(cfg, setsById[cfg.id]));
+
+  // Drag-reorder only applies to the "mine" tab, since the order is
+  // per-user and there's no notion of ordering subscriptions you don't own.
+  if (LIST_FILTER === "mine" && visible.length > 1) {
+    enableReorder(cardsEl);
+  }
 
   const emptyEl = document.getElementById("cards-empty");
   if (visible.length === 0) {
@@ -236,6 +252,74 @@ function renderTabCards(configs, setsById) {
     emptyEl.hidden = false;
   } else {
     emptyEl.hidden = true;
+  }
+}
+
+// Apply the stored ordering for "mine": configs present in USER_ORDER come
+// first in that order, anything else (newly created, never reordered) gets
+// alpha-sorted at the end. Avoids the "I made a new sub and it jumped to
+// the top because it isn't in the saved list" surprise.
+function sortMine(configs) {
+  const orderIdx = new Map(USER_ORDER.map((id, i) => [id, i]));
+  const ordered = [];
+  const rest = [];
+  for (const cfg of configs) {
+    if (orderIdx.has(cfg.id)) ordered.push(cfg);
+    else rest.push(cfg);
+  }
+  ordered.sort((a, b) => orderIdx.get(a.id) - orderIdx.get(b.id));
+  rest.sort((a, b) => a.name.localeCompare(b.name));
+  return [...ordered, ...rest];
+}
+
+// Native HTML5 drag-and-drop. Each card becomes draggable; the dragover
+// handler reorders the DOM live so the user sees the new position before
+// committing. Persistence happens on dragend so we react to *any* end of
+// drag (including ESC / drop outside) — `drop` would miss the dropped-on-
+// nothing case and leave the DOM out of sync with the backend.
+function enableReorder(container) {
+  let dragged = null;
+  for (const card of container.querySelectorAll(".check-card")) {
+    card.draggable = true;
+    card.addEventListener("dragstart", (e) => {
+      dragged = card;
+      card.classList.add("dragging");
+      // dataTransfer.setData is required for drop to fire in some browsers.
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", card.dataset.cfgId || "");
+    });
+    card.addEventListener("dragend", async () => {
+      card.classList.remove("dragging");
+      dragged = null;
+      const ids = [...container.querySelectorAll(".check-card")]
+        .map(c => c.dataset.cfgId)
+        .filter(Boolean);
+      // The visible "mine" list can be a subset of USER_ORDER if not every
+      // owned config has been ordered yet — diff against ids that were
+      // actually shown so we don't false-positive an unchanged drag.
+      const shown = ids.join("|");
+      const wasShown = [...USER_ORDER, ...ids.filter(i => !USER_ORDER.includes(i))]
+        .filter(i => ids.includes(i)).join("|");
+      if (shown === wasShown) return;
+      const prev = USER_ORDER.slice();
+      USER_ORDER = ids;
+      try {
+        await apiPutUserOrder(ids);
+      } catch (e) {
+        USER_ORDER = prev;
+        toast(`Could not save order: ${e.message}`, "error");
+        renderList();
+      }
+    });
+    card.addEventListener("dragover", (e) => {
+      if (!dragged || dragged === card) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const r = card.getBoundingClientRect();
+      const after = (e.clientY - r.top) > r.height / 2;
+      card.parentNode.insertBefore(dragged, after ? card.nextSibling : card);
+    });
+    card.addEventListener("drop", (e) => { e.preventDefault(); });
   }
 }
 
@@ -305,6 +389,7 @@ function relativeTime(iso) {
 function renderCard(cfg, snapshotEntry) {
   const node = document.getElementById("card").content.cloneNode(true);
   const article = node.querySelector("article");
+  article.dataset.cfgId = cfg.id;
   article.querySelector(".card-name").textContent = cfg.name;
   const ownerEl = article.querySelector(".card-owner");
   ownerEl.textContent = cfg.owner === USER.email ? "yours" : `by ${cfg.owner}`;

@@ -240,6 +240,13 @@ main {
 .check-card:hover { border-color: var(--accent-deep); transform: translateY(-2px); }
 .check-card:hover::before { opacity: 0.6; }
 .check-card.disabled { opacity: 0.55; }
+
+/* Drag-reorder: only the "mine" tab makes cards draggable. Browsers
+ * already override the cursor to "grabbing" while dragging — set the rest
+ * state to "grab" so the affordance is obvious before the user grabs. */
+.check-card[draggable="true"] { cursor: grab; }
+.check-card[draggable="true"]:active { cursor: grabbing; }
+.check-card.dragging { opacity: 0.45; }
 .check-card.disabled .card-name { text-decoration: line-through; color: var(--text-muted); }
 
 /* Two-row card header. Row 1: title (full width left) + matches chip on the
