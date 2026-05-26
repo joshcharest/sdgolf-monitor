@@ -547,8 +547,30 @@ def _set_list_unsubscribe(msg: EmailMessage, unsubscribe_url: str | None) -> Non
 
 
 def _subject(set_name: str, new_times: list[TeeTime]) -> str:
-    targets = sorted({t.target for t in new_times})
-    return f"[sdgolf:{set_name}] {len(new_times)} tee time(s) — {', '.join(targets)}"
+    """Headline the earliest matching slot in the format: date, dow, time, course.
+
+    Old format put a generic "[sdgolf:set] N tee time(s)" prefix and listed
+    courses — useful for inbox filtering but the actual booking info was
+    buried. Lead with the most actionable slot so the subject line alone
+    tells you whether to open the email.
+    """
+    if not new_times:
+        return f"[sdgolf:{set_name}] no tee times"
+    earliest = min(new_times, key=lambda t: (t.date, t.time, t.target))
+    headline = _slot_subject_line(earliest)
+    if len(new_times) == 1:
+        return headline
+    return f"{headline} (+{len(new_times) - 1} more)"
+
+
+def _slot_subject_line(tt: TeeTime) -> str:
+    """Format: '5/30 Sat 7:30 AM Balboa Park 18' — date, dow, time, course."""
+    try:
+        d = date.fromisoformat(tt.date)
+        date_part = f"{d.month}/{d.day} {d.strftime('%a')}"
+    except ValueError:
+        date_part = tt.date
+    return f"{date_part} {_fmt_12h(tt.time)} {tt.target}"
 
 
 def _plaintext(

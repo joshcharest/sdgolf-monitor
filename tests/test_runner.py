@@ -135,7 +135,8 @@ def test_per_set_state_files_are_isolated(tmp_path, monkeypatch):
     assert sent[0]["to_addrs"] == ["owner@example.com"]
 
 
-def test_set_name_appears_in_dry_run_subject(tmp_path, caplog):
+def test_dry_run_logs_subject_with_slot_headline(tmp_path, caplog):
+    """The DRY RUN log line includes the new slot-headline subject."""
     caplog.set_level(logging.INFO, logger="sdgolf")
     state_path = tmp_path / "post-seed.json"
     state_path.write_text("{}")  # not first-run
@@ -149,7 +150,8 @@ def test_set_name_appears_in_dry_run_subject(tmp_path, caplog):
         set_name="my-special-set", dry_run=True, smtp=None,
     )
     assert "[my-special-set] DRY RUN" in caplog.text
-    assert "[sdgolf:my-special-set]" in caplog.text
+    # Subject leads with date / dow / time / course rather than the set name.
+    assert "6/1 Mon 8 AM A" in caplog.text
 
 
 def test_no_configs_returns_zero(tmp_path, monkeypatch, caplog):
