@@ -564,10 +564,10 @@ def _subject(set_name: str, new_times: list[TeeTime]) -> str:
 
 
 def _slot_subject_line(tt: TeeTime) -> str:
-    """Format: '5/30 Sat 7:30 AM Balboa Park 18' — date, dow, time, course."""
+    """Format: 'Sat 5/30 7:30 AM Balboa Park 18' — dow, date, time, course."""
     try:
         d = date.fromisoformat(tt.date)
-        date_part = f"{d.month}/{d.day} {d.strftime('%a')}"
+        date_part = f"{d.strftime('%a')} {d.month}/{d.day}"
     except ValueError:
         date_part = tt.date
     return f"{date_part} {_fmt_12h(tt.time)} {tt.target}"

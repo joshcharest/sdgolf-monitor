@@ -150,8 +150,8 @@ def test_dry_run_logs_subject_with_slot_headline(tmp_path, caplog):
         set_name="my-special-set", dry_run=True, smtp=None,
     )
     assert "[my-special-set] DRY RUN" in caplog.text
-    # Subject leads with date / dow / time / course rather than the set name.
-    assert "6/1 Mon 8 AM A" in caplog.text
+    # Subject leads with dow / date / time / course rather than the set name.
+    assert "Mon 6/1 8 AM A" in caplog.text
 
 
 def test_no_configs_returns_zero(tmp_path, monkeypatch, caplog):
