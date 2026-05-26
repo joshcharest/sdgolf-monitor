@@ -26,9 +26,7 @@ from .client import TeeTime
 # against booking a tee time you can't realistically make (and against a
 # stale match record causing an unwanted near-term booking).
 #
-# Course-specific because Torrey wants more lead time than Balboa — the
-# 49h Torrey threshold sits inside the 8-day advanced-booking-fee window,
-# so autobook only fires in a 49h–192h band for Torrey.
+# Course-specific because Torrey wants more lead time than Balboa.
 DEFAULT_LEAD_TIME_SEC = 3 * 60 * 60         # Balboa + anything else: 3h
 LEAD_TIME_SEC_BY_COURSE = {
     "Torrey Pines North": 49 * 60 * 60,     # 49h
@@ -39,12 +37,12 @@ LEAD_TIME_SEC_BY_COURSE = {
 def lead_time_sec_for(target: str) -> int:
     return LEAD_TIME_SEC_BY_COURSE.get(target, DEFAULT_LEAD_TIME_SEC)
 
-# 8+ days out drops the slot into the resident 51735 booking class, which
+# 7+ days out drops the slot into the resident 51735 booking class, which
 # carries the non-refundable Advanced Booking Fee ($10 Balboa, $32 Torrey).
-# Autobook stays inside the no-fee 0-7 day window — the one-click "Book"
-# button is unaffected because that's an explicit user action and the fee
-# is visible in the UI.
-ADVANCED_FEE_THRESHOLD_DAYS = 8
+# Autobook stays inside the no-fee window — the one-click "Book" button is
+# unaffected because that's an explicit user action and the fee is visible
+# in the UI.
+ADVANCED_FEE_THRESHOLD_DAYS = 7
 
 _COURSE_TZ = ZoneInfo("America/Los_Angeles")
 
