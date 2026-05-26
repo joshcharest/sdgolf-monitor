@@ -17,15 +17,6 @@
     { "binding": "SNAPSHOT_KV", "id": "2ec6225e728d4004bb495a67ae87ad65" }
   ],
   "triggers": {
-    "crons": [
-      "*/5 * * * *",
-      // 7pm Pacific tee-time release: a burst of every-minute ticks for
-      // 5 minutes so we race ForeUp's release window aggressively.
-      // 02:00 UTC = 7pm PDT (Mar-Nov); 03:00 UTC = 7pm PST (Nov-Mar).
-      // One of these always lands on 7pm; the other fires at 6 or 8pm
-      // Pacific harmlessly (no slots release at that time, so the runner
-      // just finds nothing newly bookable).
-      "0-4 2,3 * * *"
-    ]
+    "crons": ["*/5 * * * *"]
   }
 }
