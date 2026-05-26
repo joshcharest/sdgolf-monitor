@@ -255,6 +255,52 @@ class _FakeDatetime:
         return real.fromisoformat(s)
 
 
+def test_autobook_torrey_requires_49h_lead_time(tmp_path, monkeypatch):
+    """Torrey slots need 49h lead time; Balboa stays on the 3h default."""
+    from datetime import date as _date_mod, datetime, timezone
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    cfg = _config("alpha", ["Torrey Pines North", "Balboa Park 18"],
+                  owner="owner@example.com")
+    cfg["autobook"] = {"enabled": True}
+
+    # Freeze now = 2026-06-01 14:00 UTC (07:00 Pacific 06-01).
+    fake_now = datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(autobook, "datetime", _FakeDatetime(fake_now))
+    monkeypatch.setattr(autobook, "date", _FakeDate(_date_mod(2026, 6, 1)))
+
+    # Torrey @ 2026-06-02 09:00 PT = ~26h out -> below 49h threshold, skip.
+    # Torrey @ 2026-06-03 09:00 PT = ~50h out -> eligible.
+    # Balboa @ 2026-06-01 11:00 PT = ~4h out -> above 3h threshold, eligible.
+    torrey_rows = [
+        {"date": "2026-06-02", "time": "09:00"},   # too soon for Torrey
+        {"date": "2026-06-03", "time": "09:00"},   # eligible
+    ]
+    balboa_rows = [
+        {"date": "2026-06-01", "time": "11:00"},   # eligible (Balboa, >3h)
+    ]
+    client = StubClient(by_target={
+        "Torrey Pines North": torrey_rows,
+        "Balboa Park 18": balboa_rows,
+    })
+
+    monkeypatch.setattr(runner.notify, "send_email", lambda **kw: None)
+    autobook_calls: list[dict] = []
+    monkeypatch.setattr(runner.notify, "send_autobook_email",
+                        lambda **kw: autobook_calls.append(kw))
+
+    budget = autobook.Budget({"date": "", "slots": []}, "owner@example.com")
+    smtp = runner.SmtpCreds(user="u", password="p")
+    runner.run_check_set(client=client, cfg=cfg, state_path=state_dir / "alpha.json",
+                         set_name="alpha", dry_run=False, smtp=smtp,
+                         autobook_budget=budget)
+
+    # Earliest eligible across all matches wins — that's the Balboa 6/1 11am.
+    assert len(autobook_calls) == 1
+    assert autobook_calls[0]["slot"].target == "Balboa Park 18"
+    assert autobook_calls[0]["slot"].date == "2026-06-01"
+
+
 def test_autobook_skips_slot_in_advanced_fee_window(tmp_path, monkeypatch):
     """A slot 8+ days out (Advanced Booking Fee territory) is skipped."""
     from datetime import date, datetime, timezone

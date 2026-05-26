@@ -24,9 +24,20 @@ from .client import TeeTime
 
 # Don't auto-book a slot that's less than this many seconds away. Guards
 # against booking a tee time you can't realistically make (and against a
-# stale match record causing an unwanted near-term booking). 3 hours covers
-# wake-up + commute + ForeUp's typical check-in window.
-MIN_LEAD_TIME_SEC = 3 * 60 * 60
+# stale match record causing an unwanted near-term booking).
+#
+# Course-specific because Torrey wants more lead time than Balboa — the
+# 49h Torrey threshold sits inside the 8-day advanced-booking-fee window,
+# so autobook only fires in a 49h–192h band for Torrey.
+DEFAULT_LEAD_TIME_SEC = 3 * 60 * 60         # Balboa + anything else: 3h
+LEAD_TIME_SEC_BY_COURSE = {
+    "Torrey Pines North": 49 * 60 * 60,     # 49h
+    "Torrey Pines South": 49 * 60 * 60,     # 49h
+}
+
+
+def lead_time_sec_for(target: str) -> int:
+    return LEAD_TIME_SEC_BY_COURSE.get(target, DEFAULT_LEAD_TIME_SEC)
 
 # 8+ days out drops the slot into the resident 51735 booking class, which
 # carries the non-refundable Advanced Booking Fee ($10 Balboa, $32 Torrey).
@@ -100,7 +111,7 @@ def pick_slot(new_times: list[TeeTime]) -> TeeTime | None:
 
 
 def far_enough_out(slot: TeeTime, now: datetime | None = None) -> bool:
-    """True if the slot's tee-off is at least MIN_LEAD_TIME_SEC from now.
+    """True if the slot's tee-off is at least the course's lead time from now.
 
     Slot date/time are course-local (Pacific). ``now`` defaults to UTC; both
     sides are tz-aware so DST is handled by zoneinfo.
@@ -110,7 +121,7 @@ def far_enough_out(slot: TeeTime, now: datetime | None = None) -> bool:
     except ValueError:
         return False
     current = now if now is not None else datetime.now(timezone.utc)
-    return (slot_dt - current).total_seconds() >= MIN_LEAD_TIME_SEC
+    return (slot_dt - current).total_seconds() >= lead_time_sec_for(slot.target)
 
 
 def has_advanced_fee(slot: TeeTime, today: date | None = None) -> bool:
@@ -191,15 +202,15 @@ class Budget:
             return None
         if not should_autobook(cfg, self.runner_account_email):
             return None
-        # Drop slots that tee off too soon (lead-time) or that fall in the
-        # advanced-booking-fee window (≥8 days out). Alerts still go out for
-        # both — only the automated booking is suppressed.
+        # Drop slots that tee off too soon (per-course lead time) or that
+        # fall in the advanced-booking-fee window (≥8 days out). Alerts
+        # still go out for both — only the automated booking is suppressed.
         eligible = [t for t in new_times if far_enough_out(t) and not has_advanced_fee(t)]
         skipped = len(new_times) - len(eligible)
         if skipped:
             log.info(
-                "[%s] autobook: skipping %d slot(s) (lead time <%dh or in advanced-fee window)",
-                cfg.get("name") or cfg.get("id"), skipped, MIN_LEAD_TIME_SEC // 3600,
+                "[%s] autobook: skipping %d slot(s) (within course lead time or in advanced-fee window)",
+                cfg.get("name") or cfg.get("id"), skipped,
             )
         slot = pick_slot(eligible)
         if slot is None:
