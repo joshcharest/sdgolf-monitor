@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time as _dttime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from . import autobook, notify, state
 from .client import Target, TeeTime
@@ -175,9 +176,26 @@ def _build_target(t: dict[str, Any]) -> Target:
 # window (no booking fee) uses 929; the 8-90 day window (advanced fee)
 # uses 51735. The same two classes work for all three SD city courses,
 # so the date alone picks the class.
+#
+# The booking horizon rolls forward at 7pm Pacific each day: that's when
+# the next day's slot opens. Before 7pm Pacific, you can only book up to
+# today+6 in the 929 window; at/after 7pm, today+7 also lands in 929.
 _BC_NEAR = 929
 _BC_FAR = 51735
-_BC_BOUNDARY_DAYS = 7
+_PACIFIC = ZoneInfo("America/Los_Angeles")
+_BOOKING_RELEASE_HOUR = 19  # 7pm Pacific
+
+
+def _booking_horizon(now_utc: datetime | None = None) -> date:
+    """Most-distant date currently inside the 0-7 day (929) window.
+
+    Anchored to Pacific time, not the runner's local clock — the GH Actions
+    runner is UTC, so naive ``date.today()`` would shift the boundary by a
+    day during Pacific evenings.
+    """
+    now_pac = (now_utc or datetime.now(tz=ZoneInfo("UTC"))).astimezone(_PACIFIC)
+    offset = 7 if now_pac.time() >= _dttime(_BOOKING_RELEASE_HOUR, 0) else 6
+    return now_pac.date() + timedelta(days=offset)
 
 
 def _resolve_target_for_date(target: Target, date_str: str) -> Target:
@@ -185,10 +203,10 @@ def _resolve_target_for_date(target: Target, date_str: str) -> Target:
     if target.provider != "foreup" or target.booking_class is not None:
         return target
     try:
-        delta = (date.fromisoformat(date_str) - date.today()).days
+        target_date = date.fromisoformat(date_str)
     except ValueError:
-        delta = 0
-    bc = _BC_NEAR if delta <= _BC_BOUNDARY_DAYS else _BC_FAR
+        return target
+    bc = _BC_NEAR if target_date <= _booking_horizon() else _BC_FAR
     return Target(
         name=target.name,
         teesheet_id=target.teesheet_id,

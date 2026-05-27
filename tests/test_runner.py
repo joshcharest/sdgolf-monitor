@@ -405,22 +405,36 @@ def test_snapshot_records_matches_disabled_and_errors(tmp_path, monkeypatch):
     assert "error" in sets["broken-set"]
 
 
-def test_auto_booking_class_uses_near_class_inside_seven_days(monkeypatch):
-    """ForeUp targets without booking_class get 929 for dates within 7 days."""
-    from datetime import date, timedelta
+def test_auto_booking_class_flips_at_7pm_pacific(monkeypatch):
+    """Horizon = today+6 before 7pm Pacific, today+7 at/after.
+
+    Today is Tue 6/2 Pacific in this fixture, so today+6=Mon 6/8 and
+    today+7=Tue 6/9. The flip happens exactly at 19:00 Pacific.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
     from sdgolf_monitor.client import Target
     from sdgolf_monitor.runner import _resolve_target_for_date
 
-    monkeypatch.setattr("sdgolf_monitor.runner.date", _FakeDate(date(2026, 6, 1)))
-
+    pac = ZoneInfo("America/Los_Angeles")
     t = Target(name="Balboa Park 18", teesheet_id=1470, provider="foreup")
-    inside = _resolve_target_for_date(t, "2026-06-08")  # 7 days out
-    far = _resolve_target_for_date(t, "2026-06-09")     # 8 days out
-    assert inside.booking_class == 929
-    assert far.booking_class == 51735
+
+    monkeypatch.setattr(
+        "sdgolf_monitor.runner.datetime",
+        _FakeDatetime(datetime(2026, 6, 2, 18, 59, tzinfo=pac)),
+    )
+    assert _resolve_target_for_date(t, "2026-06-08").booking_class == 929
+    assert _resolve_target_for_date(t, "2026-06-09").booking_class == 51735
+
+    monkeypatch.setattr(
+        "sdgolf_monitor.runner.datetime",
+        _FakeDatetime(datetime(2026, 6, 2, 19, 0, tzinfo=pac)),
+    )
+    assert _resolve_target_for_date(t, "2026-06-09").booking_class == 929
+    assert _resolve_target_for_date(t, "2026-06-10").booking_class == 51735
 
 
-def test_auto_booking_class_respects_explicit_value(monkeypatch):
+def test_auto_booking_class_respects_explicit_value():
     """If booking_class is already set, the runner doesn't touch it."""
     from sdgolf_monitor.client import Target
     from sdgolf_monitor.runner import _resolve_target_for_date
@@ -438,16 +452,3 @@ def test_auto_booking_class_skips_teeitup():
     out = _resolve_target_for_date(t, "2026-06-09")
     assert out is t
     assert out.booking_class is None
-
-
-class _FakeDate:
-    """Stand-in for runner.date that pins today() to a fixed value."""
-    def __init__(self, today_value):
-        self._today = today_value
-
-    def today(self):
-        return self._today
-
-    def fromisoformat(self, s):
-        from datetime import date as _date
-        return _date.fromisoformat(s)
