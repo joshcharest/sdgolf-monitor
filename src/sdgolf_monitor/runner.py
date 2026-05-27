@@ -64,6 +64,8 @@ def run_check_set(
                 start=parse_hhmm(w["start"]),
                 end=parse_hhmm(w["end"]),
                 weekdays=parse_weekdays(w.get("weekdays")),
+                include_dates=_parse_date_list(w.get("include_dates")),
+                exclude_dates=_parse_date_list(w.get("exclude_dates")),
             )
             for w in cfg["filter"]["windows"]
         ),
@@ -152,6 +154,29 @@ def run_check_set(
 
     state.save(state_path, seen)
     return matches
+
+
+_ISO_DATE_LEN = 10  # "YYYY-MM-DD"
+
+
+def _parse_date_list(value: Any) -> frozenset[str]:
+    """Accept a list of YYYY-MM-DD strings (or None) and return a frozenset.
+
+    Silently drops anything that isn't a parseable ISO date so a hostile or
+    stale UI write can't crash the scan.
+    """
+    if not value:
+        return frozenset()
+    out: set[str] = set()
+    for v in value:
+        if not isinstance(v, str) or len(v) != _ISO_DATE_LEN:
+            continue
+        try:
+            date.fromisoformat(v)
+        except ValueError:
+            continue
+        out.add(v)
+    return frozenset(out)
 
 
 def _build_target(t: dict[str, Any]) -> Target:

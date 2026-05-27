@@ -11,13 +11,23 @@ from .client import TeeTime
 
 @dataclass(frozen=True)
 class Window:
-    """A time-of-day window on specific weekdays."""
+    """A time-of-day window on specific weekdays, with date overrides.
+
+    ``include_dates`` are added to whatever weekdays would normally pass
+    (e.g. a Tuesday off when the weekday set is Sat+Sun). ``exclude_dates``
+    are dropped from whatever would normally pass (e.g. a weekend away).
+    Excludes always win — listing the same date in both rejects it.
+    """
     start: str           # "HH:MM" 24h, inclusive
     end: str             # "HH:MM" 24h, inclusive
     weekdays: frozenset[int] | None = None  # Mon=0..Sun=6; None = any day
+    include_dates: frozenset[str] = frozenset()  # extra YYYY-MM-DD dates
+    exclude_dates: frozenset[str] = frozenset()  # YYYY-MM-DD dates to skip
 
     def matches(self, d: str, t: str) -> bool:
-        if self.weekdays is not None:
+        if d in self.exclude_dates:
+            return False
+        if self.weekdays is not None and d not in self.include_dates:
             dow = datetime.strptime(d, "%Y-%m-%d").weekday()
             if dow not in self.weekdays:
                 return False

@@ -910,14 +910,214 @@ function applyDateMode(modeSel, relativeInput, specificInput) {
 
 function buildWindowRow(w) {
   const node = document.getElementById("window-row").content.cloneNode(true);
-  node.querySelector(".w-start").value = w.start || "07:00";
-  node.querySelector(".w-end").value = w.end || "11:00";
+  const row = node.querySelector(".window-row");
+  row.querySelector(".w-start").value = w.start || "07:00";
+  row.querySelector(".w-end").value = w.end || "11:00";
   const wd = new Set(w.weekdays || []);
-  for (const cb of node.querySelectorAll(".weekdays input")) {
+  for (const cb of row.querySelectorAll(".weekdays input")) {
     cb.checked = wd.has(cb.value);
   }
-  node.querySelector(".w-del").addEventListener("click", (e) => e.target.closest(".window-row").remove());
+  // Per-window include/exclude lists ride along as JSON on the row's
+  // dataset until readForm serializes them back; the calendar popup
+  // is the only thing that mutates these.
+  row.dataset.includeDates = JSON.stringify(Array.isArray(w.include_dates) ? w.include_dates : []);
+  row.dataset.excludeDates = JSON.stringify(Array.isArray(w.exclude_dates) ? w.exclude_dates : []);
+  row.querySelector(".w-cal").addEventListener("click", () => openWindowCalendar(row));
+  row.querySelector(".w-del").addEventListener("click", (e) => e.target.closest(".window-row").remove());
+  updateCalBadge(row);
   return node;
+}
+
+function updateCalBadge(row) {
+  const inc = JSON.parse(row.dataset.includeDates || "[]").length;
+  const exc = JSON.parse(row.dataset.excludeDates || "[]").length;
+  const btn = row.querySelector(".w-cal");
+  const total = inc + exc;
+  btn.textContent = total ? `Dates · ${total}` : "Dates";
+  btn.classList.toggle("active", total > 0);
+}
+
+// ----- Window date-override calendar ------------------------------------
+//
+// A click cycles a day through {default rule, override}. For days that
+// would match by weekday, the override is "exclude"; for days that
+// wouldn't, the override is "include". Clicking an overridden day
+// reverts it to the default rule. Out-of-range days (outside the
+// config's date span) are unclickable.
+
+const WEEKDAY_TO_DOW = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+
+function toIsoDate(d) {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function resolveDateSpec(spec) {
+  if (typeof spec !== "string") return null;
+  const s = spec.trim();
+  const rel = /^today(?:\s*\+\s*(\d+))?$/i.exec(s);
+  if (rel) {
+    const now = new Date();
+    const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    d.setUTCDate(d.getUTCDate() + (rel[1] ? parseInt(rel[1], 10) : 0));
+    return d;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, mo, d] = s.split("-").map(Number);
+    return new Date(Date.UTC(y, mo - 1, d));
+  }
+  return null;
+}
+
+function readFormDateRange(form) {
+  const readOne = (which) => {
+    const mode = form.elements[`date-${which}-mode`].value;
+    return mode === "specific"
+      ? form.elements[`date-${which}-specific`].value
+      : form.elements[`date-${which}-relative`].value;
+  };
+  return [resolveDateSpec(readOne("start")), resolveDateSpec(readOne("end"))];
+}
+
+function openWindowCalendar(row) {
+  const form = row.closest("form");
+  const [start, end] = readFormDateRange(form);
+  if (!start || !end || start > end) {
+    toast("Set a valid date range first", "error");
+    return;
+  }
+  const weekdays = new Set(
+    [...row.querySelectorAll(".weekdays input:checked")]
+      .map(cb => WEEKDAY_TO_DOW[cb.value])
+  );
+  const includes = new Set(JSON.parse(row.dataset.includeDates || "[]"));
+  const excludes = new Set(JSON.parse(row.dataset.excludeDates || "[]"));
+
+  // Drop stored overrides that have fallen outside the current range —
+  // they'd be invisible in the calendar but still emitted from readForm.
+  const startIso = toIsoDate(start), endIso = toIsoDate(end);
+  for (const set of [includes, excludes]) {
+    for (const iso of [...set]) if (iso < startIso || iso > endIso) set.delete(iso);
+  }
+
+  let cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  const endMonth = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  const modal = document.createElement("section");
+  modal.className = "card modal cal-modal";
+  backdrop.appendChild(modal);
+
+  const close = () => backdrop.remove();
+  backdrop.addEventListener("click", (e) => { if (e.target === backdrop) close(); });
+
+  function isMatchByWeekday(dow) {
+    return weekdays.size === 0 || weekdays.has(dow);
+  }
+
+  function dayClass(iso, dow, inRange) {
+    if (!inRange) return "oor";
+    if (excludes.has(iso)) return "ex";
+    if (includes.has(iso)) return "in";
+    return isMatchByWeekday(dow) ? "match" : "skip";
+  }
+
+  function toggleDay(iso, dow) {
+    if (excludes.has(iso)) excludes.delete(iso);
+    else if (includes.has(iso)) includes.delete(iso);
+    else if (isMatchByWeekday(dow)) excludes.add(iso);
+    else includes.add(iso);
+  }
+
+  function render() {
+    modal.innerHTML = "";
+    const header = document.createElement("header");
+    header.className = "cal-header";
+    const prev = document.createElement("button");
+    prev.type = "button"; prev.textContent = "‹";
+    prev.disabled = cursor <= new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+    prev.addEventListener("click", () => {
+      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() - 1, 1));
+      render();
+    });
+    const next = document.createElement("button");
+    next.type = "button"; next.textContent = "›";
+    next.disabled = cursor >= endMonth;
+    next.addEventListener("click", () => {
+      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+      render();
+    });
+    const title = document.createElement("h3");
+    title.textContent = cursor.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    header.append(prev, title, next);
+    modal.appendChild(header);
+
+    const grid = document.createElement("div");
+    grid.className = "cal-grid";
+    for (const wd of ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]) {
+      const h = document.createElement("div");
+      h.className = "cal-wd"; h.textContent = wd;
+      grid.appendChild(h);
+    }
+    // Pad leading blanks so the 1st sits under its weekday column.
+    const firstDow = cursor.getUTCDay();
+    for (let i = 0; i < firstDow; i++) grid.appendChild(Object.assign(document.createElement("div"), { className: "cal-day cal-empty" }));
+    const monthEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
+    for (let day = 1; day <= monthEnd.getUTCDate(); day++) {
+      const d = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), day));
+      const iso = toIsoDate(d);
+      const dow = d.getUTCDay();
+      const inRange = iso >= startIso && iso <= endIso;
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = `cal-day cal-${dayClass(iso, dow, inRange)}`;
+      cell.textContent = String(day);
+      cell.disabled = !inRange;
+      if (inRange) {
+        cell.addEventListener("click", () => {
+          toggleDay(iso, dow);
+          cell.className = `cal-day cal-${dayClass(iso, dow, true)}`;
+        });
+      }
+      grid.appendChild(cell);
+    }
+    modal.appendChild(grid);
+
+    const legend = document.createElement("div");
+    legend.className = "cal-legend";
+    legend.innerHTML = `
+      <span><i class="cal-sw cal-match"></i>matches</span>
+      <span><i class="cal-sw cal-skip"></i>skipped</span>
+      <span><i class="cal-sw cal-in"></i>included</span>
+      <span><i class="cal-sw cal-ex"></i>excluded</span>
+    `;
+    modal.appendChild(legend);
+
+    const footer = document.createElement("footer");
+    footer.className = "edit-footer";
+    const done = document.createElement("button");
+    done.type = "button"; done.className = "primary"; done.textContent = "Done";
+    done.addEventListener("click", () => {
+      row.dataset.includeDates = JSON.stringify([...includes].sort());
+      row.dataset.excludeDates = JSON.stringify([...excludes].sort());
+      updateCalBadge(row);
+      close();
+    });
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.textContent = "Cancel";
+    cancel.addEventListener("click", close);
+    const clear = document.createElement("button");
+    clear.type = "button"; clear.textContent = "Clear overrides";
+    clear.addEventListener("click", () => {
+      includes.clear(); excludes.clear();
+      render();
+    });
+    footer.append(done, cancel, clear);
+    modal.appendChild(footer);
+  }
+
+  render();
+  document.body.appendChild(backdrop);
 }
 
 function readForm(form) {
@@ -949,8 +1149,12 @@ function readForm(form) {
     if (!start || !end) continue;
     if (start >= end) throw new Error(`Window ${start}–${end}: end must be after start (use 24h time, e.g. 16:00 for 4 PM)`);
     const weekdays = [...row.querySelectorAll(".weekdays input:checked")].map(cb => cb.value);
+    const includeDates = JSON.parse(row.dataset.includeDates || "[]");
+    const excludeDates = JSON.parse(row.dataset.excludeDates || "[]");
     const w = { start, end };
     if (weekdays.length > 0) w.weekdays = weekdays;
+    if (includeDates.length > 0) w.include_dates = includeDates;
+    if (excludeDates.length > 0) w.exclude_dates = excludeDates;
     windows.push(w);
   }
   if (windows.length === 0) throw new Error("At least one time window is required");
