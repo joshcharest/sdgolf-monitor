@@ -117,14 +117,14 @@ def test_per_set_state_files_are_isolated(tmp_path, monkeypatch):
 
     # Alpha runs dry — finds the slot, "would email", returns without saving
     runner.run_check_set(
-        client=client, cfg=cfg, state_path=state_dir / "alpha.json",
+        clients={"foreup": client}, cfg=cfg, state_path=state_dir / "alpha.json",
         set_name="alpha", dry_run=True, smtp=None,
     )
     assert not (state_dir / "alpha.json").exists()
 
     # Beta runs live — finds the slot, emails, saves state to its own file
     runner.run_check_set(
-        client=client, cfg=cfg, state_path=state_dir / "beta.json",
+        clients={"foreup": client}, cfg=cfg, state_path=state_dir / "beta.json",
         set_name="beta", dry_run=False, smtp=smtp,
     )
     beta_state = json.loads((state_dir / "beta.json").read_text())
@@ -146,7 +146,7 @@ def test_dry_run_logs_subject_with_slot_headline(tmp_path, caplog):
     cfg = _config("my-special-set", ["A"])
 
     runner.run_check_set(
-        client=client, cfg=cfg, state_path=state_path,
+        clients={"foreup": client}, cfg=cfg, state_path=state_path,
         set_name="my-special-set", dry_run=True, smtp=None,
     )
     assert "[my-special-set] DRY RUN" in caplog.text
@@ -190,10 +190,10 @@ def test_autobook_fires_for_owner_and_caps_at_one_per_day(tmp_path, monkeypatch)
 
     budget = autobook.Budget({"date": "", "slots": []}, "owner@example.com")
     smtp = runner.SmtpCreds(user="u", password="p")
-    runner.run_check_set(client=client, cfg=cfg_a, state_path=state_dir / "alpha.json",
+    runner.run_check_set(clients={"foreup": client}, cfg=cfg_a, state_path=state_dir / "alpha.json",
                          set_name="alpha", dry_run=False, smtp=smtp,
                          autobook_budget=budget)
-    runner.run_check_set(client=client, cfg=cfg_b, state_path=state_dir / "beta.json",
+    runner.run_check_set(clients={"foreup": client}, cfg=cfg_b, state_path=state_dir / "beta.json",
                          set_name="beta", dry_run=False, smtp=smtp,
                          autobook_budget=budget)
 
@@ -233,7 +233,7 @@ def test_autobook_skips_slot_within_lead_time(tmp_path, monkeypatch):
 
     budget = autobook.Budget({"date": "", "slots": []}, "owner@example.com")
     smtp = runner.SmtpCreds(user="u", password="p")
-    runner.run_check_set(client=client, cfg=cfg, state_path=state_dir / "alpha.json",
+    runner.run_check_set(clients={"foreup": client}, cfg=cfg, state_path=state_dir / "alpha.json",
                          set_name="alpha", dry_run=False, smtp=smtp,
                          autobook_budget=budget)
 
@@ -291,7 +291,7 @@ def test_autobook_torrey_requires_49h_lead_time(tmp_path, monkeypatch):
 
     budget = autobook.Budget({"date": "", "slots": []}, "owner@example.com")
     smtp = runner.SmtpCreds(user="u", password="p")
-    runner.run_check_set(client=client, cfg=cfg, state_path=state_dir / "alpha.json",
+    runner.run_check_set(clients={"foreup": client}, cfg=cfg, state_path=state_dir / "alpha.json",
                          set_name="alpha", dry_run=False, smtp=smtp,
                          autobook_budget=budget)
 
@@ -329,7 +329,7 @@ def test_autobook_skips_slot_with_advanced_fee(tmp_path, monkeypatch):
 
     budget = autobook.Budget({"date": "", "slots": []}, "owner@example.com")
     smtp = runner.SmtpCreds(user="u", password="p")
-    runner.run_check_set(client=client, cfg=cfg, state_path=state_dir / "alpha.json",
+    runner.run_check_set(clients={"foreup": client}, cfg=cfg, state_path=state_dir / "alpha.json",
                          set_name="alpha", dry_run=False, smtp=smtp,
                          autobook_budget=budget)
 
@@ -371,7 +371,7 @@ def test_autobook_skips_when_owner_isnt_runner_account(tmp_path, monkeypatch):
 
     budget = autobook.Budget({"date": "", "slots": []}, "runner@example.com")
     smtp = runner.SmtpCreds(user="u", password="p")
-    runner.run_check_set(client=client, cfg=cfg, state_path=state_dir / "alpha.json",
+    runner.run_check_set(clients={"foreup": client}, cfg=cfg, state_path=state_dir / "alpha.json",
                          set_name="alpha", dry_run=False, smtp=smtp,
                          autobook_budget=budget)
 

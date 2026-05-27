@@ -26,10 +26,18 @@ BASE = "https://foreupsoftware.com"
 
 @dataclass(frozen=True)
 class Target:
-    """A specific (course, booking_class) pair to monitor."""
-    name: str           # human-readable, e.g. "Balboa Park 18"
-    teesheet_id: int    # the course's teesheet (passed as schedule_id to the API)
-    booking_class: int  # account-allowed booking class
+    """A specific course/rate-window pair to monitor.
+
+    Defaults match ForeUp (the SD City Golf courses). For TeeItUp-backed
+    courses like Coronado, set ``provider="teeitup"`` and populate
+    ``facility_id`` + ``alias`` instead of teesheet_id/booking_class.
+    """
+    name: str                                # human-readable, e.g. "Balboa Park 18"
+    teesheet_id: int | None = None           # ForeUp: schedule_id query param
+    booking_class: int | None = None         # ForeUp: account-allowed booking class
+    provider: str = "foreup"                 # "foreup" or "teeitup"
+    facility_id: int | None = None           # TeeItUp: golfFacilityId
+    alias: str | None = None                 # TeeItUp: x-be-alias / subdomain
 
 
 @dataclass(frozen=True)

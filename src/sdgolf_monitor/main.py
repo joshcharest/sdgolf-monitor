@@ -23,6 +23,7 @@ import requests
 from . import autobook, notify
 from .client import ForeUpClient, TeeTime
 from .runner import SmtpCreds, recipients_for, run_check_set
+from .teeitup import TeeItUpClient
 
 log = logging.getLogger("sdgolf")
 
@@ -65,6 +66,7 @@ def main(
 
     client = ForeUpClient()
     client.login(username, password)
+    clients = {"foreup": client, "teeitup": TeeItUpClient()}
     log.info(
         "logged in as %s %s; %d check set(s) to scan",
         client.user["first_name"], client.user["last_name"], len(configs),
@@ -111,7 +113,7 @@ def main(
 
         try:
             matches = run_check_set(
-                client=client,
+                clients=clients,
                 cfg=cfg,
                 state_path=state_dir / f"{config_id}.json",
                 set_name=set_name,
