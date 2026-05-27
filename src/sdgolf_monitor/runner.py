@@ -86,20 +86,23 @@ def run_check_set(
             log.error("[%s] no client for provider %r (target %s); skipping",
                       set_name, target.provider, target.name)
             continue
+        # When the filter wants both hole counts, use the API's "Both" mode
+        # (holes=all) so we get them in one response. Per-slot holes filtering
+        # still happens in flt.matches, so we drop the inner loop entirely.
+        holes_query: int | str = flt.holes[0] if len(flt.holes) == 1 else "all"
         for d in dates:
             t_for_date = _resolve_target_for_date(target, d)
-            for h in flt.holes:
-                try:
-                    times = client.get_times(t_for_date, d, holes=h)
-                except Exception:
-                    log.exception("[%s] failed to fetch %s on %s (%dh)", set_name, target.name, d, h)
-                    continue
-                hits = [t for t in times if flt.matches(t)]
-                log.info(
-                    "[%s] %s %s %dh: %d total, %d match",
-                    set_name, target.name, d, h, len(times), len(hits),
-                )
-                matches.extend(hits)
+            try:
+                times = client.get_times(t_for_date, d, holes=holes_query)
+            except Exception:
+                log.exception("[%s] failed to fetch %s on %s", set_name, target.name, d)
+                continue
+            hits = [t for t in times if flt.matches(t)]
+            log.info(
+                "[%s] %s %s holes=%s: %d total, %d match",
+                set_name, target.name, d, holes_query, len(times), len(hits),
+            )
+            matches.extend(hits)
 
     seen = state.load(state_path)
     new = [t for t in matches if state.mark(seen, t.key)]
