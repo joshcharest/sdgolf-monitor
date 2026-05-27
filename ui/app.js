@@ -1292,36 +1292,48 @@ async function openAwayCalendar() {
 function buildTourSteps() {
   return [
     {
+      view: "list",
       title: "Welcome to sdgolf-monitor",
       body: "A tee-time monitor for San Diego city courses (Balboa, Torrey Pines) and Coronado. The runner scans every 5 minutes and emails you when matching slots open up. Here's a quick tour — under a minute.",
     },
     {
+      view: "list",
       selector: "#new-btn",
       title: "Create a check set",
-      body: "Click <b>+ New subscription</b> to define a check set — courses, date range, time windows, and weekday filters. Each set has its own dedup state, so new matches only email once.",
+      body: "Click <b>+ New subscription</b> to define a check set — courses, date range, time windows, and weekday filters. Each set has its own dedup state, so new matches only email once. Hit Next and I'll open the editor so you can see what's inside.",
     },
     {
+      view: "edit",
+      title: "Inside the editor",
+      body: "Four required parts: <b>Name</b> (any label), <b>Courses</b> (one or more — booking class is auto-picked by date so you don't choose it), <b>Date range</b> (\"today\", \"today+30\", or a specific YYYY-MM-DD), and <b>Time windows</b>. Hit <b>Save</b> when done.",
+    },
+    {
+      view: "edit",
+      selector: "#windows-list",
+      title: "Time windows + per-date overrides",
+      body: "Each window has a start/end time and weekday boxes. Click <b>Dates</b> on a row to open a calendar — green-in extra days you want (a Tuesday off), red-out days you don't (a Saturday traveling). Add multiple windows for OR-style rules (e.g. weekend mornings + weekday twilight).",
+    },
+    {
+      view: "list",
       selector: ".list-tabs",
       title: "Mine vs. others",
       body: "<b>My subscriptions</b> are yours to edit. <b>Other subscriptions</b> shows everyone else's check sets — subscribe to one to share their alerts without duplicating the scan.",
-      condition: () => document.querySelector(".list-tabs") !== null,
     },
     {
+      view: "list",
       selector: ".check-card",
       title: "A subscription card",
       body: "Each card shows current matches under its filter. <b>Click</b> to edit, or <b>drag</b> to reorder. Inside a card, click a date row to expand and see the actual tee times — each time links to the booking page.",
       condition: () => document.querySelector(".check-card") !== null,
     },
     {
-      title: "Time windows + per-date overrides",
-      body: "Inside the editor, each time window has a weekday selector and a <b>Dates</b> button. The calendar lets you <b>include</b> extra days (a Tuesday off) or <b>exclude</b> ones that would otherwise match (a Saturday you're traveling). Both lists save with the check set.",
-    },
-    {
+      view: "list",
       selector: "#away-btn",
       title: "Going on vacation?",
       body: "<b>Away</b> opens a global calendar that hides matches on the days you're out, both in your inbox and on this dashboard. The runner still scans for other recipients — only your view is filtered.",
     },
     {
+      view: "list",
       selector: "#bug-fab",
       title: "Spotted something broken?",
       body: "The <b>!</b> button in the corner sends a bug report. The current view, your recent client errors, and your email are attached automatically.",
@@ -1331,12 +1343,14 @@ function buildTourSteps() {
       },
     },
     {
+      view: "list",
       selector: "#admin-btn",
       title: "Admin panel",
       body: "Manage who's allowed to sign up. Adding an email here queues a welcome message with the signup link, sent automatically on the next scan tick.",
       condition: () => USER?.is_admin,
     },
     {
+      view: "list",
       selector: "#help-btn",
       title: "Tour anytime",
       body: "Click <b>?</b> any time to walk through these features again. That's it — happy hunting.",
@@ -1357,7 +1371,38 @@ async function startTour() {
   overlay.className = "tour-overlay";
   document.body.appendChild(overlay);
 
+  // Track which element is currently lifted above the backdrop so blur
+  // doesn't apply to it. We restore inline styles when switching targets.
+  let promoted = null;
+  function promote(el) {
+    if (!el) return;
+    el._tour_orig = {
+      position: el.style.position,
+      zIndex: el.style.zIndex,
+      pointerEvents: el.style.pointerEvents,
+    };
+    if (getComputedStyle(el).position === "static") {
+      el.style.position = "relative";
+    }
+    el.style.zIndex = "251";
+    // Clicks on the target during the tour pass through to the backdrop
+    // below, which closes the tour — instead of activating the highlighted
+    // control and silently breaking the walkthrough.
+    el.style.pointerEvents = "none";
+    promoted = el;
+  }
+  function unpromote() {
+    if (!promoted) return;
+    const o = promoted._tour_orig || {};
+    promoted.style.position = o.position || "";
+    promoted.style.zIndex = o.zIndex || "";
+    promoted.style.pointerEvents = o.pointerEvents || "";
+    delete promoted._tour_orig;
+    promoted = null;
+  }
+
   function close(seen) {
+    unpromote();
     overlay.remove();
     document.removeEventListener("keydown", onKey);
     window.removeEventListener("resize", reposition);
@@ -1368,21 +1413,35 @@ async function startTour() {
     else if (e.key === "ArrowRight" || e.key === "Enter") next();
     else if (e.key === "ArrowLeft") prev();
   }
-  function next() {
+  async function next() {
     idx++;
     if (idx >= steps.length) return close(true);
-    render();
+    await render();
   }
-  function prev() {
+  async function prev() {
     if (idx > 0) idx--;
-    render();
+    await render();
   }
   function reposition() { render(); }
 
-  function render() {
-    const step = steps[idx];
-    overlay.innerHTML = "";
+  async function ensureView(view) {
+    if (view === "edit" && !CURRENT_VIEW.startsWith("edit")) {
+      renderEdit(null);
+    } else if (view === "list" && CURRENT_VIEW !== "list") {
+      await renderList();
+    }
+  }
 
+  async function render() {
+    const step = steps[idx];
+    unpromote();
+
+    // Switch views BEFORE clearing the overlay — keeps the previous tip
+    // visible during the await on renderList(), rather than flashing the
+    // backdrop empty (which broke click targeting in the brief gap).
+    if (step.view) await ensureView(step.view);
+
+    overlay.innerHTML = "";
     // Backdrop layer dims the page; clicking it closes the tour.
     const backdrop = document.createElement("div");
     backdrop.className = "tour-backdrop";
@@ -1400,6 +1459,8 @@ async function startTour() {
       hl.style.width = `${r.width + 12}px`;
       hl.style.height = `${r.height + 12}px`;
       overlay.appendChild(hl);
+      // Lift the target above the blurred backdrop so it stays sharp.
+      promote(target);
     }
 
     const tip = document.createElement("section");
@@ -1443,7 +1504,7 @@ async function startTour() {
 
   document.addEventListener("keydown", onKey);
   window.addEventListener("resize", reposition);
-  render();
+  await render();
 }
 
 function readForm(form) {
