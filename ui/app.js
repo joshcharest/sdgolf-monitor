@@ -1336,61 +1336,61 @@ function buildTourSteps() {
     {
       view: "list",
       title: "Welcome to sdgolf-monitor",
-      body: "A tee-time monitor for San Diego city courses (Balboa, Torrey Pines) and Coronado. The runner scans every 5 minutes and emails you when matching slots open up. Here's a quick tour — under a minute.",
+      body: "Tee-time alerts for the SD city courses (Balboa, Torrey Pines) and Coronado. Quick tour — under a minute.",
     },
     {
       view: "list",
       selector: "#new-btn",
       title: "Create a check set",
-      body: "Click <b>+ New subscription</b> to define a check set — courses, date range, time windows, and weekday filters. You'll only get emailed once per matching slot. Hit Next and I'll open the editor so you can see what's inside.",
+      body: "<b>+ New subscription</b> defines what to watch — courses, dates, and time windows. Hit Next to peek inside the editor.",
     },
     {
       view: "edit",
       title: "Inside the editor",
-      body: "Four required parts coming up: <b>Courses</b>, <b>Date range</b>, <b>Filter</b>, and <b>Time windows</b>. I'll walk through each one — hit Next.",
+      body: "Three sections coming up: <b>Courses</b>, <b>Date range</b>, and <b>Time windows</b>.",
     },
     {
       view: "edit",
       selector: "#courses-fs",
       title: "Courses",
-      body: "Tick any combination — a single check set can mix courses. At least one is required.",
+      body: "Tick any combination — at least one is required.",
     },
     {
       view: "edit",
       selector: "#dates-fs",
       title: "Date range",
-      body: "Each side has a <b>Relative/Specific</b> dropdown. Relative accepts <code>today</code> or <code>today+N</code> (rolls forward every tick — great for \"always next 90 days\"). Specific uses your browser's calendar picker for one-off targets.",
+      body: "Each side is either <b>Relative</b> (e.g. <code>today</code>, <code>today+30</code>) or <b>Specific</b> (a fixed calendar date).",
     },
     {
       view: "edit",
       selector: "#windows-fs",
-      title: "Time windows + per-date overrides",
-      body: "Each window has start/end times and weekday boxes. Click <b>Dates</b> on a row to override individual days — green-in extras (a Tuesday off), red-out skips (a Saturday traveling). <b>+ Add window</b> stacks multiple bands; any window matching = match (e.g. weekend mornings + weekday twilight).",
+      title: "Time windows",
+      body: "Each row is a time band + weekday filter. <b>+ Add window</b> stacks multiple bands. Click <b>Dates</b> to override specific days — green-in extras, red-out skips.",
     },
     {
       view: "list",
       selector: ".list-tabs",
       title: "Mine vs. others",
-      body: "<b>My subscriptions</b> are yours to edit. <b>Other subscriptions</b> shows everyone else's check sets — subscribe to one to share their alerts without duplicating the scan.",
+      body: "<b>My subscriptions</b> are yours to edit. <b>Other subscriptions</b> are everyone else's — Subscribe to one to share its alerts.",
     },
     {
       view: "list",
       tab: "others",
       selector: ".check-card",
       title: "A subscription card",
-      body: "Each card shows current matches under that subscription's filter. On <b>others' cards</b>, click <b>Subscribe</b> to start getting their email alerts. On <b>your own cards</b>, click to edit or drag to reorder. Either way, click a date row inside the card to expand the actual tee times — each time links to the booking page.",
+      body: "Shows current matches under that subscription's filter. Click a date row to expand the tee times. On <b>your own cards</b>, click to edit or drag to reorder; on <b>others'</b>, click <b>Subscribe</b>.",
     },
     {
       view: "list",
       selector: "#away-btn",
       title: "Going on vacation?",
-      body: "<b>Away</b> opens a global calendar that hides matches on the days you're out, both in your inbox and on this dashboard. The runner still scans for other recipients — only your view is filtered.",
+      body: "<b>Away</b> opens a calendar. Mark dates you're out and matches on those days won't email you or appear on your dashboard.",
     },
     {
       view: "list",
       selector: "#bug-fab",
       title: "Spotted something broken?",
-      body: "The <b>!</b> button in the corner sends a bug report. The current view, your recent client errors, and your email are attached automatically.",
+      body: "The <b>!</b> button sends a bug report — your current view and email are attached automatically.",
       condition: () => {
         const el = document.querySelector("#bug-fab");
         return el && !el.hidden;
@@ -1400,14 +1400,14 @@ function buildTourSteps() {
       view: "list",
       selector: "#admin-btn",
       title: "Admin panel",
-      body: "Manage who's allowed to sign up. Adding an email here queues a welcome message with the signup link, sent automatically on the next scan tick.",
+      body: "Manage who can sign up. Adding an email sends them a welcome with the signup link.",
       condition: () => USER?.is_admin,
     },
     {
       view: "list",
       selector: "#help-btn",
       title: "Tour anytime",
-      body: "Click <b>?</b> any time to walk through these features again. That's it — happy hunting.",
+      body: "Click <b>?</b> any time to take the tour again.",
     },
   ].filter(s => !s.condition || s.condition());
 }
@@ -1494,12 +1494,14 @@ async function startTour() {
       const r = target.getBoundingClientRect();
       // Clamp the highlight to the viewport so a target taller than the
       // window (e.g. a long subscription card) doesn't draw a ring above
-      // or below the visible area. The spotlight effect stays consistent.
+      // or below the visible area. A small inset keeps the gold ring off
+      // the very edge — feels cleaner and respects iOS safe areas.
       const vw = window.innerWidth, vh = window.innerHeight;
-      const top = Math.max(0, r.top - 6);
-      const left = Math.max(0, r.left - 6);
-      const right = Math.min(vw, r.right + 6);
-      const bottom = Math.min(vh, r.bottom + 6);
+      const SAFE = 12;
+      const top = Math.max(SAFE, r.top - 6);
+      const left = Math.max(SAFE, r.left - 6);
+      const right = Math.min(vw - SAFE, r.right + 6);
+      const bottom = Math.min(vh - SAFE, r.bottom + 6);
       const hl = document.createElement("div");
       hl.className = "tour-highlight";
       hl.style.top = `${top}px`;
