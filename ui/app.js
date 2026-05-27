@@ -1360,6 +1360,10 @@ function buildTourSteps() {
 
 async function startTour() {
   if (!USER?.email) return;
+  // Re-entrancy guard: ensureView → renderList during the tour would
+  // otherwise re-trigger the first-visit auto-open and stack a second
+  // overlay (with the old step 1 still visible behind the new tip).
+  if (document.querySelector(".tour-overlay")) return;
   if (CURRENT_VIEW !== "list") {
     await renderList();
   }
