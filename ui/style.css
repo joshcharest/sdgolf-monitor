@@ -709,6 +709,9 @@ select {
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
   padding-right: 30px;
+  /* Without min-width, single-char options (Min players = 1..4) auto-shrink
+   * far enough that the dropdown caret crowds the value text. */
+  min-width: 70px;
 }
 
 form label {
@@ -1371,12 +1374,44 @@ form .hint code {
   /* Narrow screens use the same two-row layout as desktop (title on top,
    * mode control + edit below). No overrides needed — the base rule
    * already produces the right shape. */
-  .window-row { flex-direction: column; align-items: stretch; }
+  /* Window row collapses to a tighter grid: times share a line with the
+   * delete (✕), weekdays sit on a second row, Dates button on a third. */
+  .window-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto;
+    grid-template-areas:
+      "start arrow end del"
+      "wd    wd    wd  wd"
+      "cal   cal   cal cal";
+    gap: 8px;
+    align-items: center;
+  }
+  .window-row > span { grid-area: arrow; text-align: center; }
+  .window-row .w-start { grid-area: start; }
+  .window-row .w-end { grid-area: end; }
+  .window-row .w-del { grid-area: del; }
+  .window-row .weekdays { grid-area: wd; justify-content: flex-start; }
+  .window-row .w-cal { grid-area: cal; justify-self: start; }
+  /* Slightly tighter weekday chips so all 7 fit on one row on most phones. */
+  .window-row .weekdays label { padding: 4px 7px; font-size: 10px; letter-spacing: 0.1em; }
+
+  /* Date row collapses to a column. flex-basis from the desktop rule was
+   * 220px, which a column treats as height — input rendered tall enough
+   * to look like a textarea. Reset basis so inputs hug their content. */
   .date-input-row { flex-direction: column; align-items: stretch; }
   .date-input-row .date-label,
   .date-input-row .date-mode { flex: none; }
   .date-input-row .date-relative,
-  .date-input-row .date-specific { max-width: none; }
+  .date-input-row .date-specific {
+    flex: 0 0 auto; max-width: none; min-width: 0;
+  }
+
+  /* Calendar popup: shrink gaps + day cells so the grid doesn't overflow
+   * a narrow viewport when the modal hits its max-width. */
+  .cal-grid { gap: 3px; }
+  .cal-day { font-size: 12px; border-radius: 4px; }
+  .cal-modal h3 { font-size: 15px; }
+
   form fieldset { padding: 12px 14px 14px; margin: 14px 0; }
   form label.inline { margin: 8px 12px 8px 0; }
   .edit-footer { flex-wrap: wrap; }
