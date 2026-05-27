@@ -8,6 +8,7 @@ import { TEESHEETS } from "./schema.js";
 
 const ROOT = document.getElementById("root");
 const NEW_BTN = document.getElementById("new-btn");
+const AWAY_BTN = document.getElementById("away-btn");
 const ADMIN_BTN = document.getElementById("admin-btn");
 const SIGNOUT_BTN = document.getElementById("signout-btn");
 const USER_BADGE = document.getElementById("user-badge");
@@ -96,6 +97,8 @@ const apiBugReport      = (payload)      => api("POST",   "/api/bug-report", pay
 const apiBookNow        = (payload)      => api("POST",   "/api/book/now", payload);
 const apiGetUserOrder   = ()             => api("GET",    "/api/me/order");
 const apiPutUserOrder   = (order)        => api("PUT",    "/api/me/order", { order });
+const apiGetAway        = ()             => api("GET",    "/api/me/away");
+const apiPutAway        = (dates)        => api("PUT",    "/api/me/away", { dates });
 
 // Fire-and-forget: tell the Worker to dispatch the monitor workflow right
 // now so the snapshot reflects this config mutation within ~30s instead of
@@ -110,6 +113,7 @@ function triggerDispatch() {
 
 function setNav({ showNew = false } = {}) {
   NEW_BTN.hidden = !showNew;
+  AWAY_BTN.hidden = !(USER && showNew);
   ADMIN_BTN.hidden = !(USER && USER.is_admin && showNew);
   SIGNOUT_BTN.hidden = !USER;
   USER_BADGE.hidden = !USER;
@@ -1120,6 +1124,137 @@ function openWindowCalendar(row) {
   document.body.appendChild(backdrop);
 }
 
+// ----- Global "Away" calendar -------------------------------------------
+//
+// Per-user list of dates this user is unavailable. The runner still scans
+// these dates (for other recipients) but skips emailing this user for
+// any slot on a date in their away list.
+
+async function openAwayCalendar() {
+  let dates;
+  try {
+    const resp = await apiGetAway();
+    dates = new Set(Array.isArray(resp.dates) ? resp.dates : []);
+  } catch (e) {
+    toast(`Could not load away dates: ${e.message}`, "error");
+    return;
+  }
+
+  // Open at today's month; allow navigation forward freely, backward a bit
+  // for fixing past entries. The server caps the persisted list at 1000.
+  const now = new Date();
+  const todayUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  let cursor = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+  const lowerBound = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1));
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  const modal = document.createElement("section");
+  modal.className = "card modal cal-modal";
+  backdrop.appendChild(modal);
+
+  const close = () => backdrop.remove();
+  backdrop.addEventListener("click", (e) => { if (e.target === backdrop) close(); });
+
+  function dayClass(iso, isPast) {
+    if (dates.has(iso)) return "ex";
+    return isPast ? "skip" : "match";
+  }
+
+  function render() {
+    modal.innerHTML = "";
+
+    const intro = document.createElement("p");
+    intro.className = "hint";
+    intro.style.marginTop = "0";
+    intro.textContent = "Click a date to mark yourself away — no email alerts for any of your subscriptions on that day.";
+    modal.appendChild(intro);
+
+    const header = document.createElement("header");
+    header.className = "cal-header";
+    const prev = document.createElement("button");
+    prev.type = "button"; prev.textContent = "‹";
+    prev.disabled = cursor <= lowerBound;
+    prev.addEventListener("click", () => {
+      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() - 1, 1));
+      render();
+    });
+    const next = document.createElement("button");
+    next.type = "button"; next.textContent = "›";
+    next.addEventListener("click", () => {
+      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+      render();
+    });
+    const title = document.createElement("h3");
+    title.textContent = cursor.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    header.append(prev, title, next);
+    modal.appendChild(header);
+
+    const grid = document.createElement("div");
+    grid.className = "cal-grid";
+    for (const wd of ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]) {
+      const h = document.createElement("div");
+      h.className = "cal-wd"; h.textContent = wd;
+      grid.appendChild(h);
+    }
+    const firstDow = cursor.getUTCDay();
+    for (let i = 0; i < firstDow; i++) grid.appendChild(Object.assign(document.createElement("div"), { className: "cal-day cal-empty" }));
+    const monthEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
+    for (let day = 1; day <= monthEnd.getUTCDate(); day++) {
+      const d = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), day));
+      const iso = toIsoDate(d);
+      const isPast = d < todayUtc;
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = `cal-day cal-${dayClass(iso, isPast)}`;
+      cell.textContent = String(day);
+      cell.addEventListener("click", () => {
+        if (dates.has(iso)) dates.delete(iso);
+        else dates.add(iso);
+        cell.className = `cal-day cal-${dayClass(iso, isPast)}`;
+      });
+      grid.appendChild(cell);
+    }
+    modal.appendChild(grid);
+
+    const legend = document.createElement("div");
+    legend.className = "cal-legend";
+    legend.innerHTML = `
+      <span><i class="cal-sw cal-match"></i>available</span>
+      <span><i class="cal-sw cal-ex"></i>away</span>
+    `;
+    modal.appendChild(legend);
+
+    const footer = document.createElement("footer");
+    footer.className = "edit-footer";
+    const done = document.createElement("button");
+    done.type = "button"; done.className = "primary"; done.textContent = "Save";
+    done.addEventListener("click", async () => {
+      done.disabled = true; done.textContent = "Saving…";
+      try {
+        // Drop dates that have already passed — they only inflate the
+        // record over time, the runner ignores them anyway.
+        const todayIso = toIsoDate(todayUtc);
+        const future = [...dates].filter(d => d >= todayIso).sort();
+        await apiPutAway(future);
+        close();
+        toast(future.length ? `Saved ${future.length} away day(s)` : "Away calendar cleared");
+      } catch (e) {
+        done.disabled = false; done.textContent = "Save";
+        toast(`Save failed: ${e.message}`, "error");
+      }
+    });
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.textContent = "Cancel";
+    cancel.addEventListener("click", close);
+    footer.append(done, cancel);
+    modal.appendChild(footer);
+  }
+
+  render();
+  document.body.appendChild(backdrop);
+}
+
 function readForm(form) {
   // booking_class is intentionally omitted from emitted targets — the
   // runner picks the right ForeUp class (929 vs 51735) per-date based
@@ -1434,6 +1569,7 @@ function openBugModal() {
 // ----- Boot --------------------------------------------------------------
 
 NEW_BTN.addEventListener("click", () => renderEdit(null));
+AWAY_BTN.addEventListener("click", () => openAwayCalendar());
 ADMIN_BTN.addEventListener("click", () => renderAdmin());
 document.getElementById("brand-link").addEventListener("click", () => {
   if (USER) renderList();

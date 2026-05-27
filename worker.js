@@ -32,6 +32,8 @@ export default {
     if (pathname === "/api/me"          && method === "GET")  return handleMe(request, env);
     if (pathname === "/api/me/order"    && method === "GET")  return handleGetUserOrder(request, env);
     if (pathname === "/api/me/order"    && method === "PUT")  return handlePutUserOrder(request, env);
+    if (pathname === "/api/me/away"     && method === "GET")  return handleGetAway(request, env);
+    if (pathname === "/api/me/away"     && method === "PUT")  return handlePutAway(request, env);
 
     if (pathname === "/api/internal/configs" && method === "GET") return handleInternalConfigs(request, env);
     if (pathname === "/api/internal/pending" && method === "GET") return handleInternalPending(request, env);
@@ -315,6 +317,53 @@ function userOrderKey(email) {
 
 async function readUserOrder(env, email) {
   const v = await env.SNAPSHOT_KV.get(userOrderKey(email));
+  if (!v) return [];
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed.filter(x => typeof x === "string") : [];
+  } catch { return []; }
+}
+
+// Per-user "away" calendar — dates where this user shouldn't receive email
+// alerts for any of their owned or subscribed configs. Filtered at email
+// time (the runner still scans), so each recipient's away list is
+// independent: if Alice subscribes to Bob's config and Alice is away,
+// only Alice's email is suppressed for that date — Bob still gets one.
+async function handleGetAway(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const dates = await readUserAway(env, session.email);
+  return json({ dates });
+}
+
+async function handlePutAway(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const body = await safeJson(request);
+  if (!body || !Array.isArray(body.dates)) return json({ error: "expected { dates: [\"YYYY-MM-DD\", ...] }" }, 400);
+  if (body.dates.length > 1000) return json({ error: "too many dates" }, 400);
+  const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+  const seen = new Set();
+  const cleaned = [];
+  for (const d of body.dates) {
+    if (typeof d !== "string" || !isoRe.test(d) || seen.has(d)) continue;
+    // Catch nonsense like "2026-13-40" — Date parsing round-trips bad input.
+    const parsed = new Date(`${d}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== d) continue;
+    seen.add(d);
+    cleaned.push(d);
+  }
+  cleaned.sort();
+  await env.SNAPSHOT_KV.put(awayKey(session.email), JSON.stringify(cleaned));
+  return json({ dates: cleaned });
+}
+
+function awayKey(email) {
+  return `away:${String(email).toLowerCase()}`;
+}
+
+async function readUserAway(env, email) {
+  const v = await env.SNAPSHOT_KV.get(awayKey(email));
   if (!v) return [];
   try {
     const parsed = JSON.parse(v);
@@ -781,6 +830,32 @@ function bookPage(message, status) {
 async function handleInternalConfigs(request, env) {
   if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
   const configs = await loadAllConfigs(env);
+  // Decorate each config with the away-dates of its recipients (owner +
+  // subscribers) so the runner can filter outgoing emails per-recipient
+  // without an extra round-trip per address. Each recipient's away list
+  // is small enough that bundling here is cheaper than a second endpoint.
+  const recipients = new Set();
+  for (const cfg of configs) {
+    if (cfg.owner) recipients.add(cfg.owner.toLowerCase());
+    for (const s of cfg.subscribers || []) {
+      if (typeof s === "string" && s) recipients.add(s.toLowerCase());
+    }
+  }
+  const awayByEmail = {};
+  await Promise.all([...recipients].map(async (email) => {
+    const dates = await readUserAway(env, email);
+    if (dates.length) awayByEmail[email] = dates;
+  }));
+  for (const cfg of configs) {
+    const map = {};
+    const consider = (addr) => {
+      const norm = (addr || "").toLowerCase();
+      if (norm && awayByEmail[norm]) map[norm] = awayByEmail[norm];
+    };
+    consider(cfg.owner);
+    for (const s of cfg.subscribers || []) consider(s);
+    if (Object.keys(map).length) cfg.recipient_away = map;
+  }
   return json(configs);
 }
 

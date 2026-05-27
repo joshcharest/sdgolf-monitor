@@ -489,6 +489,7 @@ def send_email(
     worker_url: str | None = None,
     unsubscribe_secret: str | None = None,
     autobook_account_email: str | None = None,
+    recipient_away: dict[str, set[str]] | None = None,
 ) -> None:
     """Send a digest email for one check set's new matches, one message per recipient.
 
@@ -513,10 +514,18 @@ def send_email(
         {tt.key: _book_url(worker_url, unsubscribe_secret, tt, config_id) for tt in new_times}
         if book_links_enabled else None
     )
+    away = recipient_away or {}
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
         smtp.login(smtp_user, smtp_password)
         for addr in to_addrs:
-            is_owner = addr.strip().lower() == owner_norm
+            addr_norm = addr.strip().lower()
+            # Drop slots on dates this recipient marked themselves away.
+            # If everything got dropped, skip the recipient entirely.
+            their_away = away.get(addr_norm) or set()
+            their_times = [t for t in new_times if t.date not in their_away] if their_away else new_times
+            if not their_times:
+                continue
+            is_owner = addr_norm == owner_norm
             unsub = None if is_owner else _unsubscribe_url(worker_url, unsubscribe_secret, addr, config_id or "")
             # Only the owner sees the "Book now" link — subscribers wouldn't be
             # able to redeem it anyway (worker checks owner-account match).
@@ -524,14 +533,14 @@ def send_email(
             msg = EmailMessage()
             msg["From"] = smtp_user
             msg["To"] = addr
-            msg["Subject"] = _subject(set_name, new_times)
+            msg["Subject"] = _subject(set_name, their_times)
             _set_list_unsubscribe(msg, unsub)
             msg.set_content(_plaintext(
-                new_times, set_name=set_name, unsubscribe_url=unsub,
+                their_times, set_name=set_name, unsubscribe_url=unsub,
                 book_urls=urls_for_recipient,
             ))
             msg.add_alternative(_html(
-                new_times, set_name=set_name, unsubscribe_url=unsub,
+                their_times, set_name=set_name, unsubscribe_url=unsub,
                 book_urls=urls_for_recipient,
             ), subtype="html")
             smtp.send_message(msg, to_addrs=[addr])

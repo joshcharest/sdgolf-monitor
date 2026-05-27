@@ -443,6 +443,39 @@ def test_auto_booking_class_respects_explicit_value():
     assert _resolve_target_for_date(t, "2026-06-09").booking_class == 49924
 
 
+def test_runner_forwards_recipient_away_to_notify(tmp_path, monkeypatch):
+    """run_check_set passes the worker's recipient_away map through to notify."""
+    sent: list[dict] = []
+    monkeypatch.setattr(runner.notify, "send_email", lambda **kw: sent.append(kw))
+
+    cfg = _config("alpha", ["A"], owner="owner@example.com")
+    cfg["recipient_away"] = {"owner@example.com": ["2026-06-01"]}
+
+    client = StubClient(by_target={"A": [{"date": "2026-06-01", "time": "08:00"}]})
+    smtp = runner.SmtpCreds(user="u", password="p")
+    runner.run_check_set(
+        clients={"foreup": client}, cfg=cfg, state_path=tmp_path / "alpha.json",
+        set_name="alpha", dry_run=False, smtp=smtp,
+    )
+    assert len(sent) == 1
+    assert sent[0]["recipient_away"] == {"owner@example.com": {"2026-06-01"}}
+
+
+def test_runner_omits_recipient_away_when_unset(tmp_path, monkeypatch):
+    """No recipient_away on the config -> notify gets None (fast path)."""
+    sent: list[dict] = []
+    monkeypatch.setattr(runner.notify, "send_email", lambda **kw: sent.append(kw))
+
+    cfg = _config("alpha", ["A"], owner="owner@example.com")
+    client = StubClient(by_target={"A": [{"date": "2026-06-01", "time": "08:00"}]})
+    smtp = runner.SmtpCreds(user="u", password="p")
+    runner.run_check_set(
+        clients={"foreup": client}, cfg=cfg, state_path=tmp_path / "alpha.json",
+        set_name="alpha", dry_run=False, smtp=smtp,
+    )
+    assert sent[0]["recipient_away"] is None
+
+
 def test_auto_booking_class_skips_teeitup():
     """TeeItUp targets have no booking class concept; pass through unchanged."""
     from sdgolf_monitor.client import Target

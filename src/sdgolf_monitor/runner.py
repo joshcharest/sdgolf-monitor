@@ -132,6 +132,7 @@ def run_check_set(
             worker_url=worker_url,
             unsubscribe_secret=unsubscribe_secret,
             autobook_account_email=autobook_account_email,
+            recipient_away=_recipient_away_set(cfg),
         )
 
     # Autobook runs after the regular digest so the owner gets both:
@@ -184,6 +185,23 @@ def _parse_date_list(value: Any) -> frozenset[str]:
             continue
         out.add(v)
     return frozenset(out)
+
+
+def _recipient_away_set(cfg: dict[str, Any]) -> dict[str, set[str]] | None:
+    """Convert the worker's recipient_away map (email -> [dates]) to sets.
+
+    Returns None when the worker provided nothing, so notify.send_email can
+    take its fast path. Keys are lower-cased to match the recipient
+    normalization in send_email's per-addr loop.
+    """
+    raw = cfg.get("recipient_away")
+    if not isinstance(raw, dict) or not raw:
+        return None
+    return {
+        str(email).lower(): {d for d in dates if isinstance(d, str)}
+        for email, dates in raw.items()
+        if isinstance(dates, list)
+    }
 
 
 def _build_target(t: dict[str, Any]) -> Target:
