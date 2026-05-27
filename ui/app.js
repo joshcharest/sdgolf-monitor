@@ -556,17 +556,17 @@ function renderCardMatches(article, cfg, entry) {
     : allMatches;
   const hidden = allMatches.length - matches.length;
   if (matches.length === 0) {
-    summary.textContent = hidden ? `0 shown · ${hidden} on away day${hidden === 1 ? "" : "s"}` : "0 matches";
+    summary.textContent = hidden ? `${hidden} hidden` : "0 matches";
     summary.classList.add("dim");
     const li = document.createElement("li");
     li.className = "none";
-    li.textContent = hidden ? "All matches fall on away days" : "None";
+    li.textContent = hidden ? "All matches hidden" : "None";
     list.appendChild(li);
     wrapper.hidden = false;
     return;
   }
   const base = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
-  summary.textContent = hidden ? `${base} · ${hidden} hidden by away` : base;
+  summary.textContent = hidden ? `${base} · ${hidden} hidden` : base;
   summary.classList.add("hit");
 
   // Group by course, then by date. Each day starts collapsed; clicking the
