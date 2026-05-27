@@ -70,7 +70,14 @@ def run_check_set(
             for w in cfg["filter"]["windows"]
         ),
     )
-    dates = date_range(cfg["dates"]["start"], cfg["dates"]["end"])
+    all_dates = date_range(cfg["dates"]["start"], cfg["dates"]["end"])
+    # Skip dates no window can match — saves an HTTP call per (target, holes)
+    # for every day that fails weekday / include / exclude.
+    dates = [d for d in all_dates if flt.date_in_play(d)]
+    skipped = len(all_dates) - len(dates)
+    if skipped:
+        log.info("[%s] scanning %d/%d date(s); %d skipped by window rules",
+                 set_name, len(dates), len(all_dates), skipped)
 
     matches: list[TeeTime] = []
     for target in targets:

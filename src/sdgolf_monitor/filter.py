@@ -25,13 +25,22 @@ class Window:
     exclude_dates: frozenset[str] = frozenset()  # YYYY-MM-DD dates to skip
 
     def matches(self, d: str, t: str) -> bool:
+        if not self.date_in_play(d):
+            return False
+        return self.start <= t <= self.end
+
+    def date_in_play(self, d: str) -> bool:
+        """True if this date *could* match the window (date-only check).
+
+        Lets the runner skip API calls for dates that no window will
+        accept regardless of slot time.
+        """
         if d in self.exclude_dates:
             return False
-        if self.weekdays is not None and d not in self.include_dates:
-            dow = datetime.strptime(d, "%Y-%m-%d").weekday()
-            if dow not in self.weekdays:
-                return False
-        return self.start <= t <= self.end
+        if self.weekdays is None or d in self.include_dates:
+            return True
+        dow = datetime.strptime(d, "%Y-%m-%d").weekday()
+        return dow in self.weekdays
 
 
 @dataclass(frozen=True)
@@ -49,6 +58,10 @@ class Filter:
         if self.max_green_fee is not None and tt.green_fee is not None and tt.green_fee > self.max_green_fee:
             return False
         return any(w.matches(tt.date, tt.time) for w in self.windows)
+
+    def date_in_play(self, d: str) -> bool:
+        """True if at least one window could accept a slot on this date."""
+        return any(w.date_in_play(d) for w in self.windows)
 
 
 def parse_holes(value: object) -> tuple[int, ...]:

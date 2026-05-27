@@ -53,6 +53,36 @@ def test_window_exclude_wins_over_include():
     assert not w.matches("2026-06-09", "08:00")
 
 
+def test_date_in_play_skips_non_matching_weekdays():
+    """Runner uses this to avoid HTTP calls for dates that can't possibly match."""
+    sat_sun = parse_weekdays(["sat", "sun"])
+    w = Window("07:00", "11:00", weekdays=sat_sun)
+    assert w.date_in_play("2026-06-06")          # saturday
+    assert not w.date_in_play("2026-06-05")      # friday
+
+
+def test_date_in_play_honors_overrides():
+    sat_sun = parse_weekdays(["sat", "sun"])
+    w = Window("07:00", "11:00", weekdays=sat_sun,
+               include_dates=frozenset({"2026-06-09"}),
+               exclude_dates=frozenset({"2026-06-06"}))
+    assert w.date_in_play("2026-06-09")          # tuesday added
+    assert not w.date_in_play("2026-06-06")      # saturday excluded
+
+
+def test_filter_date_in_play_unions_windows():
+    """Date passes if any window will accept it."""
+    sat_sun = parse_weekdays(["sat", "sun"])
+    weekday = parse_weekdays(["mon", "tue", "wed", "thu", "fri"])
+    f = Filter(min_players=1, max_green_fee=None, holes=(18,),
+               windows=(
+                   Window("07:00", "11:00", weekdays=sat_sun),
+                   Window("15:00", "18:00", weekdays=weekday),
+               ))
+    assert f.date_in_play("2026-06-05")          # friday via window 2
+    assert f.date_in_play("2026-06-06")          # saturday via window 1
+
+
 def test_filter_min_players():
     f = Filter(min_players=3, max_green_fee=None, holes=(18,),
                windows=(Window("06:00", "20:00"),))
