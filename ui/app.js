@@ -1300,12 +1300,12 @@ function buildTourSteps() {
       view: "list",
       selector: "#new-btn",
       title: "Create a check set",
-      body: "Click <b>+ New subscription</b> to define a check set — courses, date range, time windows, and weekday filters. Each set has its own dedup state, so new matches only email once. Hit Next and I'll open the editor so you can see what's inside.",
+      body: "Click <b>+ New subscription</b> to define a check set — courses, date range, time windows, and weekday filters. You'll only get emailed once per matching slot. Hit Next and I'll open the editor so you can see what's inside.",
     },
     {
       view: "edit",
       title: "Inside the editor",
-      body: "Four required parts: <b>Name</b> (any label), <b>Courses</b> (one or more — booking class is auto-picked by date so you don't choose it), <b>Date range</b> (\"today\", \"today+30\", or a specific YYYY-MM-DD), and <b>Time windows</b>. Hit <b>Save</b> when done.",
+      body: "Four required parts: <b>Name</b> (any label), <b>Courses</b> (pick one or more), <b>Date range</b> (\"today\", \"today+30\", or a specific YYYY-MM-DD), and <b>Time windows</b>. Hit <b>Save</b> when done.",
     },
     {
       view: "edit",
@@ -1375,38 +1375,7 @@ async function startTour() {
   overlay.className = "tour-overlay";
   document.body.appendChild(overlay);
 
-  // Track which element is currently lifted above the backdrop so blur
-  // doesn't apply to it. We restore inline styles when switching targets.
-  let promoted = null;
-  function promote(el) {
-    if (!el) return;
-    el._tour_orig = {
-      position: el.style.position,
-      zIndex: el.style.zIndex,
-      pointerEvents: el.style.pointerEvents,
-    };
-    if (getComputedStyle(el).position === "static") {
-      el.style.position = "relative";
-    }
-    el.style.zIndex = "251";
-    // Clicks on the target during the tour pass through to the backdrop
-    // below, which closes the tour — instead of activating the highlighted
-    // control and silently breaking the walkthrough.
-    el.style.pointerEvents = "none";
-    promoted = el;
-  }
-  function unpromote() {
-    if (!promoted) return;
-    const o = promoted._tour_orig || {};
-    promoted.style.position = o.position || "";
-    promoted.style.zIndex = o.zIndex || "";
-    promoted.style.pointerEvents = o.pointerEvents || "";
-    delete promoted._tour_orig;
-    promoted = null;
-  }
-
   function close(seen) {
-    unpromote();
     overlay.remove();
     document.removeEventListener("keydown", onKey);
     window.removeEventListener("resize", reposition);
@@ -1438,7 +1407,6 @@ async function startTour() {
 
   async function render() {
     const step = steps[idx];
-    unpromote();
 
     // Switch views BEFORE clearing the overlay — keeps the previous tip
     // visible during the await on renderList(), rather than flashing the
@@ -1446,15 +1414,22 @@ async function startTour() {
     if (step.view) await ensureView(step.view);
 
     overlay.innerHTML = "";
-    // Backdrop layer dims the page; clicking it closes the tour.
-    const backdrop = document.createElement("div");
-    backdrop.className = "tour-backdrop";
-    backdrop.addEventListener("click", () => close(true));
-    overlay.appendChild(backdrop);
 
     let target = step.selector ? document.querySelector(step.selector) : null;
     if (target) {
       try { target.scrollIntoView({ block: "center", behavior: "instant" }); } catch { /* older browsers */ }
+    }
+
+    // Backdrop = click-to-close zone. When a target exists, the spotlight's
+    // box-shadow handles the dimming so the backdrop stays transparent;
+    // otherwise the backdrop itself dims the page for a centered tip.
+    const backdrop = document.createElement("div");
+    backdrop.className = "tour-backdrop";
+    backdrop.style.background = target ? "transparent" : "rgba(0, 0, 0, 0.62)";
+    backdrop.addEventListener("click", () => close(true));
+    overlay.appendChild(backdrop);
+
+    if (target) {
       const r = target.getBoundingClientRect();
       const hl = document.createElement("div");
       hl.className = "tour-highlight";
@@ -1463,8 +1438,6 @@ async function startTour() {
       hl.style.width = `${r.width + 12}px`;
       hl.style.height = `${r.height + 12}px`;
       overlay.appendChild(hl);
-      // Lift the target above the blurred backdrop so it stays sharp.
-      promote(target);
     }
 
     const tip = document.createElement("section");
