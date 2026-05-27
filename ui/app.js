@@ -45,6 +45,7 @@ const CACHE = new Map();
 let USER = null;  // { email } once signed in
 let LIST_FILTER = "mine";  // "mine" | "others" — persists across renderList calls
 let USER_ORDER = [];       // per-user ordering for "mine" tab; refreshed in renderList
+let USER_AWAY = new Set(); // dates the signed-in user marked away; hides matches
 let CURRENT_VIEW = "boot";  // updated on each render — included in bug reports
 
 // ----- Toast -------------------------------------------------------------
@@ -208,6 +209,13 @@ async function renderList() {
     const { order } = await apiGetUserOrder();
     USER_ORDER = Array.isArray(order) ? order : [];
   } catch { USER_ORDER = []; }
+
+  // Away dates filter matches on every visible card. Same dates the runner
+  // uses to suppress my own emails — kept in sync via openAwayCalendar.
+  try {
+    const { dates } = await apiGetAway();
+    USER_AWAY = new Set(Array.isArray(dates) ? dates : []);
+  } catch { USER_AWAY = new Set(); }
 
   for (const cfg of configs) CACHE.set(cfg.id, cfg);
 
@@ -532,18 +540,23 @@ function renderCardMatches(article, cfg, entry) {
     summary.classList.add("dim");
     return;
   }
-  const matches = entry.matches || [];
+  const allMatches = entry.matches || [];
+  const matches = USER_AWAY.size
+    ? allMatches.filter(m => !USER_AWAY.has(m.date))
+    : allMatches;
+  const hidden = allMatches.length - matches.length;
   if (matches.length === 0) {
-    summary.textContent = "0 matches";
+    summary.textContent = hidden ? `0 shown · ${hidden} on away day${hidden === 1 ? "" : "s"}` : "0 matches";
     summary.classList.add("dim");
     const li = document.createElement("li");
     li.className = "none";
-    li.textContent = "None";
+    li.textContent = hidden ? "All matches fall on away days" : "None";
     list.appendChild(li);
     wrapper.hidden = false;
     return;
   }
-  summary.textContent = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
+  const base = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
+  summary.textContent = hidden ? `${base} · ${hidden} hidden by away` : base;
   summary.classList.add("hit");
 
   // Group by course, then by date. Each day starts collapsed; clicking the
@@ -1237,8 +1250,12 @@ async function openAwayCalendar() {
         const todayIso = toIsoDate(todayUtc);
         const future = [...dates].filter(d => d >= todayIso).sort();
         await apiPutAway(future);
+        USER_AWAY = new Set(future);
         close();
         toast(future.length ? `Saved ${future.length} away day(s)` : "Away calendar cleared");
+        // Re-render the list so cards reflect the new away filter
+        // without waiting for the next snapshot tick.
+        if (CURRENT_VIEW === "list") renderList();
       } catch (e) {
         done.disabled = false; done.textContent = "Save";
         toast(`Save failed: ${e.message}`, "error");
