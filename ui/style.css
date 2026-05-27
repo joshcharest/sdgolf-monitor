@@ -826,6 +826,11 @@ form .hint code {
   color: var(--accent-fg);
   border-color: var(--accent);
 }
+.window-row .weekdays label.wd-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 
 /* ---------- Course checkbox grid ------------------------------------- */
 
