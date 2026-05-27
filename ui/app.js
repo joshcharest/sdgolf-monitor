@@ -1379,7 +1379,6 @@ function buildTourSteps() {
       selector: ".check-card",
       title: "A subscription card",
       body: "Each card shows current matches under that subscription's filter. On <b>others' cards</b>, click <b>Subscribe</b> to start getting their email alerts. On <b>your own cards</b>, click to edit or drag to reorder. Either way, click a date row inside the card to expand the actual tee times — each time links to the booking page.",
-      condition: () => document.querySelector(".check-card") !== null,
     },
     {
       view: "list",
@@ -1493,12 +1492,20 @@ async function startTour() {
 
     if (target) {
       const r = target.getBoundingClientRect();
+      // Clamp the highlight to the viewport so a target taller than the
+      // window (e.g. a long subscription card) doesn't draw a ring above
+      // or below the visible area. The spotlight effect stays consistent.
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const top = Math.max(0, r.top - 6);
+      const left = Math.max(0, r.left - 6);
+      const right = Math.min(vw, r.right + 6);
+      const bottom = Math.min(vh, r.bottom + 6);
       const hl = document.createElement("div");
       hl.className = "tour-highlight";
-      hl.style.top = `${r.top - 6}px`;
-      hl.style.left = `${r.left - 6}px`;
-      hl.style.width = `${r.width + 12}px`;
-      hl.style.height = `${r.height + 12}px`;
+      hl.style.top = `${top}px`;
+      hl.style.left = `${left}px`;
+      hl.style.width = `${Math.max(0, right - left)}px`;
+      hl.style.height = `${Math.max(0, bottom - top)}px`;
       overlay.appendChild(hl);
     }
 
