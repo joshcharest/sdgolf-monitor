@@ -20,6 +20,6 @@ export const TEESHEETS = [
   { id: 1490,  label: "Balboa Park 9",      provider: "foreup",  facility: 19348 },
   { id: 1468,  label: "Torrey Pines North", provider: "foreup",  facility: 19347 },
   { id: 1487,  label: "Torrey Pines South", provider: "foreup",  facility: 19347 },
-  { id: 10985, label: "Coronado 18 (3-14d)", provider: "teeitup",
+  { id: 10985, label: "Coronado (3-14d)", provider: "teeitup",
     facility_id: 10985, alias: "coronado-gc-3-14-be" },
 ];
