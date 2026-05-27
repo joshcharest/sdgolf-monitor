@@ -999,9 +999,10 @@ function updateCalBadge(row) {
   const inc = JSON.parse(row.dataset.includeDates || "[]").length;
   const exc = JSON.parse(row.dataset.excludeDates || "[]").length;
   const btn = row.querySelector(".w-cal");
-  const total = inc + exc;
-  btn.textContent = total ? `Dates · ${total}` : "Dates";
-  btn.classList.toggle("active", total > 0);
+  const count = inc + exc;
+  // Only the count span is mutated; the SVG icon stays intact.
+  btn.querySelector(".w-cal-count").textContent = count ? String(count) : "";
+  btn.classList.toggle("active", count > 0);
 }
 
 // ----- Window date-override calendar ------------------------------------
@@ -1365,7 +1366,7 @@ function buildTourSteps() {
       view: "edit",
       selector: "#windows-fs",
       title: "Time windows",
-      body: "Each row is a time band + weekday filter. <b>+ Add window</b> stacks multiple bands. Click <b>Dates</b> to override specific days — green-in extras, red-out skips.",
+      body: "Each row is a time band + weekday filter. <b>+ Add window</b> stacks multiple bands. Click the <b>calendar icon</b> to override specific days — green-in extras, red-out skips.",
     },
     {
       view: "list",
@@ -1375,7 +1376,6 @@ function buildTourSteps() {
     },
     {
       view: "list",
-      tab: "others",
       selector: ".check-card",
       title: "A subscription card",
       body: "Shows current matches under that subscription's filter. Click a date row to expand the tee times. On <b>your own cards</b>, click to edit or drag to reorder; on <b>others'</b>, click <b>Subscribe</b>.",
@@ -1477,8 +1477,18 @@ async function startTour() {
     overlay.innerHTML = "";
 
     let target = step.selector ? document.querySelector(step.selector) : null;
+    const isMobile = window.innerWidth < 720;
     if (target) {
-      try { target.scrollIntoView({ block: "center", behavior: "instant" }); } catch { /* older browsers */ }
+      // On mobile we'll bottom-pin the tip; scroll the target so its
+      // middle sits in the upper half of the viewport (above where the
+      // tip will land). On desktop, center it normally.
+      const block = isMobile ? "start" : "center";
+      try { target.scrollIntoView({ block, behavior: "instant" }); } catch { /* older browsers */ }
+      if (isMobile) {
+        // scrollIntoView({block:"start"}) puts target.top at viewport top.
+        // Nudge down ~16px so the highlight ring has a clean inset.
+        window.scrollBy({ top: -16, behavior: "instant" });
+      }
     }
 
     // Backdrop = click-to-close zone. When a target exists, the spotlight's
@@ -1493,15 +1503,17 @@ async function startTour() {
     if (target) {
       const r = target.getBoundingClientRect();
       // Clamp the highlight to the viewport so a target taller than the
-      // window (e.g. a long subscription card) doesn't draw a ring above
-      // or below the visible area. A small inset keeps the gold ring off
-      // the very edge — feels cleaner and respects iOS safe areas.
+      // window doesn't draw a ring above or below the visible area.
+      // On mobile the tip is bottom-pinned, so reserve ~240px at the
+      // bottom for it — the highlight stops above the tip rather than
+      // overlapping it.
       const vw = window.innerWidth, vh = window.innerHeight;
       const SAFE = 12;
+      const bottomReserve = isMobile ? 240 : SAFE;
       const top = Math.max(SAFE, r.top - 6);
       const left = Math.max(SAFE, r.left - 6);
       const right = Math.min(vw - SAFE, r.right + 6);
-      const bottom = Math.min(vh - SAFE, r.bottom + 6);
+      const bottom = Math.min(vh - bottomReserve, r.bottom + 6);
       const hl = document.createElement("div");
       hl.className = "tour-highlight";
       hl.style.top = `${top}px`;
@@ -1525,40 +1537,50 @@ async function startTour() {
     `;
     overlay.appendChild(tip);
 
-    // Position the tip near the target without overlapping it. Preferred
-    // order: below, above, right, left. If none fit, center as last resort.
-    const tipRect = tip.getBoundingClientRect();
+    // Position the tip. On mobile, pin to the bottom so it never covers
+    // the highlighted feature regardless of the target's size. On desktop,
+    // try below/above/right/left/center near the target.
     const pad = 14;
-    if (target) {
-      const r = target.getBoundingClientRect();
-      const vw = window.innerWidth, vh = window.innerHeight;
-      const fitsBelow = r.bottom + pad + tipRect.height <= vh - pad;
-      const fitsAbove = r.top - pad - tipRect.height >= pad;
-      const fitsRight = r.right + pad + tipRect.width <= vw - pad;
-      const fitsLeft = r.left - pad - tipRect.width >= pad;
-
-      let top, left;
-      if (fitsBelow) {
-        top = r.bottom + pad;
-        left = r.left + r.width / 2 - tipRect.width / 2;
-      } else if (fitsAbove) {
-        top = r.top - tipRect.height - pad;
-        left = r.left + r.width / 2 - tipRect.width / 2;
-      } else if (fitsRight) {
-        left = r.right + pad;
-        top = r.top + r.height / 2 - tipRect.height / 2;
-      } else if (fitsLeft) {
-        left = r.left - tipRect.width - pad;
-        top = r.top + r.height / 2 - tipRect.height / 2;
-      } else {
-        top = (vh - tipRect.height) / 2;
-        left = (vw - tipRect.width) / 2;
-      }
-      tip.style.top = `${Math.max(pad, Math.min(top, vh - tipRect.height - pad))}px`;
-      tip.style.left = `${Math.max(pad, Math.min(left, vw - tipRect.width - pad))}px`;
+    if (isMobile) {
+      tip.style.left = `${pad}px`;
+      tip.style.right = `${pad}px`;
+      tip.style.bottom = `${pad}px`;
+      tip.style.top = "auto";
+      tip.style.width = "auto";
+      tip.style.maxWidth = "none";
     } else {
-      tip.style.top = `${Math.max(pad, (window.innerHeight - tipRect.height) / 2)}px`;
-      tip.style.left = `${Math.max(pad, (window.innerWidth - tipRect.width) / 2)}px`;
+      const tipRect = tip.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      if (target) {
+        const r = target.getBoundingClientRect();
+        const fitsBelow = r.bottom + pad + tipRect.height <= vh - pad;
+        const fitsAbove = r.top - pad - tipRect.height >= pad;
+        const fitsRight = r.right + pad + tipRect.width <= vw - pad;
+        const fitsLeft = r.left - pad - tipRect.width >= pad;
+
+        let top, left;
+        if (fitsBelow) {
+          top = r.bottom + pad;
+          left = r.left + r.width / 2 - tipRect.width / 2;
+        } else if (fitsAbove) {
+          top = r.top - tipRect.height - pad;
+          left = r.left + r.width / 2 - tipRect.width / 2;
+        } else if (fitsRight) {
+          left = r.right + pad;
+          top = r.top + r.height / 2 - tipRect.height / 2;
+        } else if (fitsLeft) {
+          left = r.left - tipRect.width - pad;
+          top = r.top + r.height / 2 - tipRect.height / 2;
+        } else {
+          top = (vh - tipRect.height) / 2;
+          left = (vw - tipRect.width) / 2;
+        }
+        tip.style.top = `${Math.max(pad, Math.min(top, vh - tipRect.height - pad))}px`;
+        tip.style.left = `${Math.max(pad, Math.min(left, vw - tipRect.width - pad))}px`;
+      } else {
+        tip.style.top = `${Math.max(pad, (vh - tipRect.height) / 2)}px`;
+        tip.style.left = `${Math.max(pad, (vw - tipRect.width) / 2)}px`;
+      }
     }
 
     tip.querySelector(".tour-skip").addEventListener("click", () => close(true));
