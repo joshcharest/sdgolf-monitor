@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -76,9 +77,10 @@ def run_check_set(
                       set_name, target.provider, target.name)
             continue
         for d in dates:
+            t_for_date = _resolve_target_for_date(target, d)
             for h in flt.holes:
                 try:
-                    times = client.get_times(target, d, holes=h)
+                    times = client.get_times(t_for_date, d, holes=h)
                 except Exception:
                     log.exception("[%s] failed to fetch %s on %s (%dh)", set_name, target.name, d, h)
                     continue
@@ -160,11 +162,38 @@ def _build_target(t: dict[str, Any]) -> Target:
             facility_id=int(t["facility_id"]),
             alias=str(t["alias"]),
         )
+    raw_bc = t.get("booking_class")
     return Target(
         name=t["name"],
         provider="foreup",
         teesheet_id=int(t["teesheet_id"]),
-        booking_class=int(t["booking_class"]),
+        booking_class=int(raw_bc) if raw_bc is not None else None,
+    )
+
+
+# ForeUp resident booking-class boundaries for SD City Golf. The 0-7 day
+# window (no booking fee) uses 929; the 8-90 day window (advanced fee)
+# uses 51735. The same two classes work for all three SD city courses,
+# so the date alone picks the class.
+_BC_NEAR = 929
+_BC_FAR = 51735
+_BC_BOUNDARY_DAYS = 7
+
+
+def _resolve_target_for_date(target: Target, date_str: str) -> Target:
+    """If a ForeUp target left booking_class unset, pick it by date proximity."""
+    if target.provider != "foreup" or target.booking_class is not None:
+        return target
+    try:
+        delta = (date.fromisoformat(date_str) - date.today()).days
+    except ValueError:
+        delta = 0
+    bc = _BC_NEAR if delta <= _BC_BOUNDARY_DAYS else _BC_FAR
+    return Target(
+        name=target.name,
+        teesheet_id=target.teesheet_id,
+        booking_class=bc,
+        provider=target.provider,
     )
 
 

@@ -403,3 +403,51 @@ def test_snapshot_records_matches_disabled_and_errors(tmp_path, monkeypatch):
     assert sets["disabled-set"]["enabled"] is False
     assert sets["disabled-set"]["matches"] == []
     assert "error" in sets["broken-set"]
+
+
+def test_auto_booking_class_uses_near_class_inside_seven_days(monkeypatch):
+    """ForeUp targets without booking_class get 929 for dates within 7 days."""
+    from datetime import date, timedelta
+    from sdgolf_monitor.client import Target
+    from sdgolf_monitor.runner import _resolve_target_for_date
+
+    monkeypatch.setattr("sdgolf_monitor.runner.date", _FakeDate(date(2026, 6, 1)))
+
+    t = Target(name="Balboa Park 18", teesheet_id=1470, provider="foreup")
+    inside = _resolve_target_for_date(t, "2026-06-08")  # 7 days out
+    far = _resolve_target_for_date(t, "2026-06-09")     # 8 days out
+    assert inside.booking_class == 929
+    assert far.booking_class == 51735
+
+
+def test_auto_booking_class_respects_explicit_value(monkeypatch):
+    """If booking_class is already set, the runner doesn't touch it."""
+    from sdgolf_monitor.client import Target
+    from sdgolf_monitor.runner import _resolve_target_for_date
+
+    t = Target(name="X", teesheet_id=1470, booking_class=49924, provider="foreup")
+    assert _resolve_target_for_date(t, "2026-06-09").booking_class == 49924
+
+
+def test_auto_booking_class_skips_teeitup():
+    """TeeItUp targets have no booking class concept; pass through unchanged."""
+    from sdgolf_monitor.client import Target
+    from sdgolf_monitor.runner import _resolve_target_for_date
+
+    t = Target(name="Coronado", provider="teeitup", facility_id=10985, alias="x")
+    out = _resolve_target_for_date(t, "2026-06-09")
+    assert out is t
+    assert out.booking_class is None
+
+
+class _FakeDate:
+    """Stand-in for runner.date that pins today() to a fixed value."""
+    def __init__(self, today_value):
+        self._today = today_value
+
+    def today(self):
+        return self._today
+
+    def fromisoformat(self, s):
+        from datetime import date as _date
+        return _date.fromisoformat(s)
