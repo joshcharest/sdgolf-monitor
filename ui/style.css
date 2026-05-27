@@ -863,9 +863,6 @@ form .hint code {
   font-variation-settings: 'opsz' 36;
 }
 
-.booking-class-row { align-items: center; }
-.booking-class-row #booking-class { min-width: 340px; }
-
 /* ---------- Date input row ------------------------------------------- */
 
 .date-input-row {
@@ -1211,7 +1208,6 @@ form .hint code {
   .date-input-row .date-mode { flex: none; }
   .date-input-row .date-relative,
   .date-input-row .date-specific { max-width: none; }
-  .booking-class-row #booking-class { min-width: 0; width: 100%; }
   form fieldset { padding: 12px 14px 14px; margin: 14px 0; }
   form label.inline { margin: 8px 12px 8px 0; }
   .edit-footer { flex-wrap: wrap; }

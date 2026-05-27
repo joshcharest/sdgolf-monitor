@@ -4,7 +4,7 @@
 // views rendered by cloning <template> elements. Auth is an HttpOnly session
 // cookie set by the Worker on login/signup, so no tokens live in localStorage.
 
-import { TEESHEETS, BOOKING_CLASSES } from "./schema.js";
+import { TEESHEETS } from "./schema.js";
 
 const ROOT = document.getElementById("root");
 const NEW_BTN = document.getElementById("new-btn");
@@ -886,28 +886,6 @@ function setupTargets(targets) {
     node.querySelector(".course-label").textContent = ts.label;
     grid.appendChild(node);
   }
-
-  const bcCounts = new Map();
-  for (const t of targets) bcCounts.set(t.booking_class, (bcCounts.get(t.booking_class) || 0) + 1);
-  const dominantBc = [...bcCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 929;
-  if (bcCounts.size > 1) {
-    toast("Note: this set had mixed booking classes; the most common one is selected for all courses", "info");
-  }
-
-  const bcSel = document.getElementById("booking-class");
-  for (const bc of BOOKING_CLASSES) {
-    const opt = document.createElement("option");
-    opt.value = bc.id; opt.textContent = bc.label;
-    bcSel.appendChild(opt);
-  }
-  bcSel.appendChild(Object.assign(document.createElement("option"), { value: "custom", textContent: "Custom…" }));
-  const bcCustom = document.getElementById("booking-class-custom");
-  if (BOOKING_CLASSES.some(bc => bc.id === dominantBc)) {
-    bcSel.value = String(dominantBc);
-  } else {
-    bcSel.value = "custom"; bcCustom.value = dominantBc; bcCustom.hidden = false;
-  }
-  bcSel.addEventListener("change", () => { bcCustom.hidden = bcSel.value !== "custom"; });
 }
 
 function setupDateInput(form, which, spec) {
@@ -946,13 +924,10 @@ function buildWindowRow(w) {
 }
 
 function readForm(form) {
-  const bcSel = form.querySelector("#booking-class");
-  const booking_class = bcSel.value === "custom"
-    ? parseInt(form.querySelector("#booking-class-custom").value, 10)
-    : parseInt(bcSel.value, 10);
-
+  // booking_class is intentionally omitted from emitted targets — the
+  // runner picks the right ForeUp class (929 vs 51735) per-date based
+  // on how far out the slot is, since the date alone determines it.
   const targets = [];
-  let needsBookingClass = false;
   for (const cb of form.querySelectorAll('input[name="course"]:checked')) {
     const id = parseInt(cb.value, 10);
     const meta = TEESHEETS.find(ts => ts.id === id);
@@ -965,14 +940,10 @@ function readForm(form) {
         alias: meta.alias,
       });
     } else {
-      needsBookingClass = true;
-      targets.push({ name: meta.label, teesheet_id: id, booking_class });
+      targets.push({ name: meta.label, teesheet_id: id });
     }
   }
   if (targets.length === 0) throw new Error("Select at least one course");
-  if (needsBookingClass && !Number.isFinite(booking_class)) {
-    throw new Error("Booking class is required for SD City courses");
-  }
 
   const windows = [];
   for (const row of form.querySelectorAll("#windows-list .window-row")) {
