@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import autobook, notify, state
-from .client import ForeUpClient, Target, TeeTime
+from .client import Target, TeeTime
 from .filter import Filter, Window, date_range, parse_hhmm, parse_holes, parse_weekdays
 
 log = logging.getLogger("sdgolf")
@@ -26,7 +26,7 @@ class SmtpCreds:
 
 def run_check_set(
     *,
-    client: ForeUpClient,
+    clients: dict[str, Any],
     cfg: dict[str, Any],
     state_path: Path,
     set_name: str,
@@ -44,21 +44,15 @@ def run_check_set(
     dedup state) so the orchestrator can build a snapshot for the UI.
 
     Args:
-        client: Already-logged-in ForeUp client; reused across check sets.
+        clients: Map of provider name -> client. Each Target picks its
+            client by ``target.provider`` (defaults to "foreup").
         cfg: Parsed YAML config (see configs/*.yaml schema).
         state_path: Where to read/write the dedup state for this set.
         set_name: Used in log lines and the email subject.
         dry_run: If True, never send email and never write state.
         smtp: SMTP credentials. May be None only in dry_run mode.
     """
-    targets = [
-        Target(
-            name=t["name"],
-            teesheet_id=int(t["teesheet_id"]),
-            booking_class=int(t["booking_class"]),
-        )
-        for t in cfg["targets"]
-    ]
+    targets = [_build_target(t) for t in cfg["targets"]]
     flt = Filter(
         min_players=int(cfg["filter"].get("min_players", 1)),
         max_green_fee=cfg["filter"].get("max_green_fee"),
@@ -76,6 +70,11 @@ def run_check_set(
 
     matches: list[TeeTime] = []
     for target in targets:
+        client = clients.get(target.provider)
+        if client is None:
+            log.error("[%s] no client for provider %r (target %s); skipping",
+                      set_name, target.provider, target.name)
+            continue
         for d in dates:
             for h in flt.holes:
                 try:
@@ -150,6 +149,23 @@ def run_check_set(
 
     state.save(state_path, seen)
     return matches
+
+
+def _build_target(t: dict[str, Any]) -> Target:
+    provider = (t.get("provider") or "foreup").lower()
+    if provider == "teeitup":
+        return Target(
+            name=t["name"],
+            provider="teeitup",
+            facility_id=int(t["facility_id"]),
+            alias=str(t["alias"]),
+        )
+    return Target(
+        name=t["name"],
+        provider="foreup",
+        teesheet_id=int(t["teesheet_id"]),
+        booking_class=int(t["booking_class"]),
+    )
 
 
 def recipients_for(cfg: dict[str, Any]) -> list[str]:

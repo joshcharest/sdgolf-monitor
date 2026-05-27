@@ -647,7 +647,10 @@ function buildTimeLi(m, onBook) {
   link.append(primary, meta);
   row.appendChild(link);
 
-  if (onBook) {
+  // TeeItUp slots aren't bookable through the worker (no auth/captcha
+  // automation); fall back to the link-only UX for those courses.
+  const isTeeItUp = TEESHEETS.find(t => t.label === m.target)?.provider === "teeitup";
+  if (onBook && !isTeeItUp) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "match-book-btn";
@@ -679,6 +682,15 @@ function buildTimeLi(m, onBook) {
 
 function bookingUrl(m) {
   const ts = TEESHEETS.find(t => t.label === m.target);
+  if (ts?.provider === "teeitup") {
+    const params = new URLSearchParams({
+      course: String(ts.facility_id),
+      holes: String(m.holes ?? 18),
+      max: "999999",
+    });
+    if (/^\d{4}-\d{2}-\d{2}$/.test(m.date)) params.set("date", m.date);
+    return `https://${ts.alias}.book.teeitup.com/?${params.toString()}`;
+  }
   const bookingClass = m.booking_fee ? 51735 : 929;
   const facility = ts?.facility ?? 19348;
   const base = `https://foreupsoftware.com/index.php/booking/${facility}/${bookingClass}`;
@@ -859,7 +871,11 @@ function renderEdit(existingId) {
 
 function setupTargets(targets) {
   const knownIds = new Set(TEESHEETS.map(ts => ts.id));
-  const selectedIds = new Set(targets.map(t => t.teesheet_id).filter(id => knownIds.has(id)));
+  // Targets carry either teesheet_id (ForeUp) or facility_id (TeeItUp);
+  // TEESHEETS.id is reused for both, so look at both.
+  const selectedIds = new Set(
+    targets.map(t => t.teesheet_id ?? t.facility_id).filter(id => knownIds.has(id))
+  );
 
   const grid = document.getElementById("courses-grid");
   for (const ts of TEESHEETS) {
@@ -934,15 +950,29 @@ function readForm(form) {
   const booking_class = bcSel.value === "custom"
     ? parseInt(form.querySelector("#booking-class-custom").value, 10)
     : parseInt(bcSel.value, 10);
-  if (!Number.isFinite(booking_class)) throw new Error("Booking class is required");
 
   const targets = [];
+  let needsBookingClass = false;
   for (const cb of form.querySelectorAll('input[name="course"]:checked')) {
     const id = parseInt(cb.value, 10);
     const meta = TEESHEETS.find(ts => ts.id === id);
-    targets.push({ name: meta.label, teesheet_id: id, booking_class });
+    if (!meta) continue;
+    if (meta.provider === "teeitup") {
+      targets.push({
+        name: meta.label,
+        provider: "teeitup",
+        facility_id: meta.facility_id,
+        alias: meta.alias,
+      });
+    } else {
+      needsBookingClass = true;
+      targets.push({ name: meta.label, teesheet_id: id, booking_class });
+    }
   }
   if (targets.length === 0) throw new Error("Select at least one course");
+  if (needsBookingClass && !Number.isFinite(booking_class)) {
+    throw new Error("Booking class is required for SD City courses");
+  }
 
   const windows = [];
   for (const row of form.querySelectorAll("#windows-list .window-row")) {
