@@ -1193,12 +1193,17 @@ form .hint code {
 .w-cal:hover { color: var(--text); border-color: var(--text-dim); }
 .w-cal.active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
 
-.cal-modal { max-width: 380px; }
+.modal-backdrop > .modal.cal-modal { max-width: 420px; }
 .cal-header {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: center;
+  gap: 14px;
   margin-bottom: 12px;
 }
-.cal-header h3 { margin: 0; font-size: 16px; font-weight: 500; }
+.cal-header h3 {
+  margin: 0;
+  font-size: 16px; font-weight: 500;
+  min-width: 9ch; text-align: center;
+}
 .cal-header button {
   width: 32px; height: 32px;
   border: 1px solid var(--border);
@@ -1207,7 +1212,10 @@ form .hint code {
   border-radius: 6px;
   cursor: pointer;
   font-size: 18px;
+  line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
 }
+.cal-header button:hover:not(:disabled) { border-color: var(--text-dim); }
 .cal-header button:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .cal-grid {
