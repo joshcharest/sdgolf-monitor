@@ -45,6 +45,10 @@ export default {
     const bugMatch = pathname.match(/^\/api\/internal\/bugs\/([a-z0-9-]{1,128})$/);
     if (bugMatch && method === "DELETE") return handleInternalBugDelete(request, env, bugMatch[1]);
 
+    if (pathname === "/api/internal/welcomes" && method === "GET") return handleInternalWelcomes(request, env);
+    const welcomeMatch = pathname.match(/^\/api\/internal\/welcomes\/([a-z0-9-]{1,128})$/);
+    if (welcomeMatch && method === "DELETE") return handleInternalWelcomeDelete(request, env, welcomeMatch[1]);
+
     if (pathname === "/api/admin/emails" && method === "GET") return handleAdminListEmails(request, env);
     if (pathname === "/api/admin/emails" && method === "PUT") return handleAdminPutEmails(request, env);
     if (pathname === "/api/admin/users"  && method === "GET") return handleAdminListUsers(request, env);
@@ -221,8 +225,19 @@ async function handleAdminPutEmails(request, env) {
     await env.SNAPSHOT_KV.delete(`user:${email}`);
   }
 
+  // Queue a welcome email for anyone newly added (and not an admin — admins
+  // bootstrap themselves into the list, no welcome needed). The runner sends
+  // these on its next tick using the same Gmail SMTP path as alert emails.
+  const added = final.filter(e => !previous.has(e) && !admins.has(e));
+  for (const email of added) {
+    const id = `${Date.now().toString(36)}-${randomIdSuffix()}`;
+    const record = { id, email, ts: new Date().toISOString() };
+    await env.SNAPSHOT_KV.put(`welcome:${id}`, JSON.stringify(record));
+    await indexAdd(env, "welcome_index", "welcome:", id);
+  }
+
   await env.SNAPSHOT_KV.put("allowed_emails", JSON.stringify(final));
-  return json({ emails: final, removed });
+  return json({ emails: final, removed, welcomed: added });
 }
 
 async function handleAdminListUsers(request, env) {
@@ -927,6 +942,26 @@ async function handleInternalBugDelete(request, env, id) {
   if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
   await env.SNAPSHOT_KV.delete(`bug:${id}`);
   await indexRemove(env, "bug_index", "bug:", id);
+  return new Response(null, { status: 204 });
+}
+
+async function handleInternalWelcomes(request, env) {
+  if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  const ids = await loadIndex(env, "welcome_index", "welcome:");
+  const values = await Promise.all(ids.map(id => env.SNAPSHOT_KV.get(`welcome:${id}`)));
+  const out = [];
+  for (let i = 0; i < ids.length; i++) {
+    const v = values[i];
+    if (!v) continue;
+    try { out.push({ key: `welcome:${ids[i]}`, ...JSON.parse(v) }); } catch { /* skip */ }
+  }
+  return json(out);
+}
+
+async function handleInternalWelcomeDelete(request, env, id) {
+  if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  await env.SNAPSHOT_KV.delete(`welcome:${id}`);
+  await indexRemove(env, "welcome_index", "welcome:", id);
   return new Response(null, { status: 204 });
 }
 

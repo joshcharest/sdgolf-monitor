@@ -86,10 +86,11 @@ def run_check_set(
             log.error("[%s] no client for provider %r (target %s); skipping",
                       set_name, target.provider, target.name)
             continue
-        # When the filter wants both hole counts, use the API's "Both" mode
-        # (holes=all) so we get them in one response. Per-slot holes filtering
-        # still happens in flt.matches, so we drop the inner loop entirely.
-        holes_query: int | str = flt.holes[0] if len(flt.holes) == 1 else "all"
+        # Always query holes=all so two configs scanning the same teesheet
+        # on the same date share a cache hit regardless of whether they
+        # filter for 9, 18, or both. Per-slot filtering in flt.matches
+        # drops anything outside the config's actual holes preference.
+        holes_query: int | str = "all"
         horizon = _target_horizon_date(target.provider)
         target_dates = (
             dates if horizon is None

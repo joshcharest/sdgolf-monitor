@@ -247,6 +247,64 @@ def _autobook_html(set_name: str, slot: TeeTime, players: int, *, dry_run: bool)
     return "<div style='font-family:sans-serif'>" + "".join(body) + "</div>"
 
 
+def send_welcome_email(
+    *,
+    smtp_user: str,
+    smtp_password: str,
+    to_addr: str,
+    signup_url: str,
+) -> None:
+    """One-shot welcome email when an admin adds a new allowed email.
+
+    Tells them they've been authorized and links to the signup page.
+    Subject is namespaced like the alert digests so Gmail filters can
+    catch it.
+    """
+    if not to_addr:
+        return
+    msg = EmailMessage()
+    msg["From"] = smtp_user
+    msg["To"] = to_addr
+    msg["Subject"] = "[sdgolf] You've been added to sdgolf-monitor"
+    msg.set_content(_welcome_plaintext(signup_url))
+    msg.add_alternative(_welcome_html(signup_url), subtype="html")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
+        smtp.login(smtp_user, smtp_password)
+        smtp.send_message(msg, to_addrs=[to_addr])
+
+
+def _welcome_plaintext(signup_url: str) -> str:
+    return (
+        "You've been added to sdgolf-monitor — a tee-time monitor for San\n"
+        "Diego city golf courses (Balboa, Torrey Pines) and Coronado.\n"
+        "\n"
+        f"Sign up here to set a password and subscribe to alerts:\n  {signup_url}\n"
+        "\n"
+        "After signing in, browse other people's subscriptions and click\n"
+        "Subscribe to start getting their email alerts, or create your own\n"
+        "with custom courses, dates, time windows, and weekday filters.\n"
+    )
+
+
+def _welcome_html(signup_url: str) -> str:
+    href = (signup_url or "").replace('"', "&quot;")
+    return (
+        "<div style='font-family:sans-serif;max-width:560px'>"
+        "<h2 style='margin:0 0 10px'>Welcome to sdgolf-monitor</h2>"
+        "<p>You've been added to a tee-time monitor for San Diego city golf "
+        "(Balboa, Torrey Pines) and Coronado.</p>"
+        f"<p><a href=\"{href}\" "
+        "style='display:inline-block;padding:10px 18px;background:#c9a96a;"
+        "color:#0d1612;text-decoration:none;border-radius:6px;font-weight:600'>"
+        "Sign up</a></p>"
+        f"<p style='color:#666;font-size:12px'>Or paste this URL into your browser: "
+        f"<code>{href}</code></p>"
+        "<p style='color:#666;font-size:12px'>After signing in, subscribe to existing "
+        "check sets or create your own with custom courses, dates, and time windows.</p>"
+        "</div>"
+    )
+
+
 def send_bug_report(
     *,
     smtp_user: str,

@@ -38,6 +38,8 @@ def main(
     pending_consume: "callable[[str], None] | None" = None,
     bugs: list[dict[str, Any]] | None = None,
     bug_consume: "callable[[str], None] | None" = None,
+    welcomes: list[dict[str, Any]] | None = None,
+    welcome_consume: "callable[[str], None] | None" = None,
     admin_emails: list[str] | None = None,
     worker_url: str | None = None,
     unsubscribe_secret: str | None = None,
@@ -193,6 +195,29 @@ def main(
             if bug_consume:
                 bug_consume(b["key"])
 
+    # Process welcome records queued when an admin adds a new allowed email.
+    if welcomes and not dry_run and smtp is not None:
+        signup_url = worker_url or ""
+        for w in welcomes:
+            to_addr = (w.get("email") or "").strip()
+            if not to_addr:
+                if welcome_consume:
+                    welcome_consume(w["key"])
+                continue
+            try:
+                notify.send_welcome_email(
+                    smtp_user=smtp.user,
+                    smtp_password=smtp.password,
+                    to_addr=to_addr,
+                    signup_url=signup_url,
+                )
+                log.info("sent welcome email to %s", to_addr)
+            except Exception:
+                log.exception("failed to send welcome to %s; will retry next run", to_addr)
+                continue
+            if welcome_consume:
+                welcome_consume(w["key"])
+
     if autobook_budget is not None:
         autobook.save_state(autobook_state_path, autobook_budget.snapshot())
 
@@ -256,6 +281,27 @@ def consume_bug(worker_url: str, runner_secret: str, key: str) -> None:
     bug_id = key.removeprefix("bug:")
     resp = requests.delete(
         f"{worker_url.rstrip('/')}/api/internal/bugs/{bug_id}",
+        headers={"Authorization": f"Bearer {runner_secret}"},
+        timeout=20,
+    )
+    if resp.status_code not in (200, 204, 404):
+        resp.raise_for_status()
+
+
+def fetch_welcomes(worker_url: str, runner_secret: str) -> list[dict[str, Any]]:
+    resp = requests.get(
+        f"{worker_url.rstrip('/')}/api/internal/welcomes",
+        headers={"Authorization": f"Bearer {runner_secret}"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def consume_welcome(worker_url: str, runner_secret: str, key: str) -> None:
+    welcome_id = key.removeprefix("welcome:")
+    resp = requests.delete(
+        f"{worker_url.rstrip('/')}/api/internal/welcomes/{welcome_id}",
         headers={"Authorization": f"Bearer {runner_secret}"},
         timeout=20,
     )
@@ -377,6 +423,11 @@ def cli() -> int:
     except Exception:
         log.exception("failed to fetch bug reports; continuing without them")
         bugs = []
+    try:
+        welcomes = fetch_welcomes(worker_url, runner_secret)
+    except Exception:
+        log.exception("failed to fetch welcomes; continuing without them")
+        welcomes = []
     admin_emails = [
         e.strip() for e in os.environ.get("ADMIN_EMAILS", "sdgolfmonitor@gmail.com").split(",") if e.strip()
     ]
@@ -394,6 +445,8 @@ def cli() -> int:
         pending_consume=lambda key: consume_pending(worker_url, runner_secret, key),
         bugs=bugs,
         bug_consume=lambda key: consume_bug(worker_url, runner_secret, key),
+        welcomes=welcomes,
+        welcome_consume=lambda key: consume_welcome(worker_url, runner_secret, key),
         admin_emails=admin_emails,
         worker_url=worker_url,
         unsubscribe_secret=runner_secret,
