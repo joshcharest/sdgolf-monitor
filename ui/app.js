@@ -1305,13 +1305,31 @@ function buildTourSteps() {
     {
       view: "edit",
       title: "Inside the editor",
-      body: "Four required parts: <b>Name</b> (any label), <b>Courses</b> (pick one or more), <b>Date range</b> (\"today\", \"today+30\", or a specific YYYY-MM-DD), and <b>Time windows</b>. Hit <b>Save</b> when done.",
+      body: "Four required parts coming up: <b>Courses</b>, <b>Date range</b>, <b>Filter</b>, and <b>Time windows</b>. I'll walk through each one — hit Next.",
     },
     {
       view: "edit",
-      selector: "#windows-list",
+      selector: "#courses-fs",
+      title: "Courses",
+      body: "Tick any combination — a single check set can mix courses. At least one is required. Want to add a course not listed here? Let me know.",
+    },
+    {
+      view: "edit",
+      selector: "#dates-fs",
+      title: "Date range",
+      body: "Each side has a <b>Relative/Specific</b> dropdown. Relative accepts <code>today</code> or <code>today+N</code> (rolls forward every tick — great for \"always next 90 days\"). Specific uses your browser's calendar picker for one-off targets.",
+    },
+    {
+      view: "edit",
+      selector: "#filter-fs",
+      title: "Filter",
+      body: "<b>Holes</b> — 9, 18, or Both. <b>Min players</b> — minimum open spots a slot needs to count as a match. Set min players to 4 if you only care about foursomes.",
+    },
+    {
+      view: "edit",
+      selector: "#windows-fs",
       title: "Time windows + per-date overrides",
-      body: "Each window has a start/end time and weekday boxes. Click <b>Dates</b> on a row to open a calendar — green-in extra days you want (a Tuesday off), red-out days you don't (a Saturday traveling). Add multiple windows for OR-style rules (e.g. weekend mornings + weekday twilight).",
+      body: "Each window has start/end times and weekday boxes. Click <b>Dates</b> on a row to override individual days — green-in extras (a Tuesday off), red-out skips (a Saturday traveling). <b>+ Add window</b> stacks multiple bands; any window matching = match (e.g. weekend mornings + weekday twilight).",
     },
     {
       view: "list",
@@ -1454,21 +1472,37 @@ async function startTour() {
     `;
     overlay.appendChild(tip);
 
-    // Position the tip below the target if possible, otherwise above; for
-    // steps without a target, center it.
+    // Position the tip near the target without overlapping it. Preferred
+    // order: below, above, right, left. If none fit, center as last resort.
     const tipRect = tip.getBoundingClientRect();
     const pad = 14;
     if (target) {
       const r = target.getBoundingClientRect();
-      let top = r.bottom + pad;
-      if (top + tipRect.height > window.innerHeight - pad) {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const fitsBelow = r.bottom + pad + tipRect.height <= vh - pad;
+      const fitsAbove = r.top - pad - tipRect.height >= pad;
+      const fitsRight = r.right + pad + tipRect.width <= vw - pad;
+      const fitsLeft = r.left - pad - tipRect.width >= pad;
+
+      let top, left;
+      if (fitsBelow) {
+        top = r.bottom + pad;
+        left = r.left + r.width / 2 - tipRect.width / 2;
+      } else if (fitsAbove) {
         top = r.top - tipRect.height - pad;
+        left = r.left + r.width / 2 - tipRect.width / 2;
+      } else if (fitsRight) {
+        left = r.right + pad;
+        top = r.top + r.height / 2 - tipRect.height / 2;
+      } else if (fitsLeft) {
+        left = r.left - tipRect.width - pad;
+        top = r.top + r.height / 2 - tipRect.height / 2;
+      } else {
+        top = (vh - tipRect.height) / 2;
+        left = (vw - tipRect.width) / 2;
       }
-      if (top < pad) top = pad;
-      let left = r.left + r.width / 2 - tipRect.width / 2;
-      left = Math.max(pad, Math.min(left, window.innerWidth - tipRect.width - pad));
-      tip.style.top = `${top}px`;
-      tip.style.left = `${left}px`;
+      tip.style.top = `${Math.max(pad, Math.min(top, vh - tipRect.height - pad))}px`;
+      tip.style.left = `${Math.max(pad, Math.min(left, vw - tipRect.width - pad))}px`;
     } else {
       tip.style.top = `${Math.max(pad, (window.innerHeight - tipRect.height) / 2)}px`;
       tip.style.left = `${Math.max(pad, (window.innerWidth - tipRect.width) / 2)}px`;
