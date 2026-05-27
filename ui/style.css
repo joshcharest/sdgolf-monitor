@@ -75,15 +75,18 @@ header {
   gap: 8px 16px;
   padding: 22px 32px 20px;
   border-bottom: 1px solid var(--border);
-  /* Solid background — at 65% alpha the cards underneath bled through when
-   * the page scrolled, so the sticky header has to be opaque. The subtle
-   * top-edge highlight preserves the previous look. */
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent),
-    var(--bg);
+  /* Two-layer background: a tiny top-edge highlight on top of a fully
+   * opaque base color. Without an explicit background-color, some
+   * browsers were letting card titles show through the gradient layer
+   * while scrolling. */
+  background-color: var(--bg);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent);
   position: sticky;
   top: 0;
-  z-index: 50;
+  z-index: 100;
+  /* Force its own stacking context so card hover transforms (z-index +
+   * transform) can't promote a card above the header. */
+  isolation: isolate;
 }
 
 .brand {
