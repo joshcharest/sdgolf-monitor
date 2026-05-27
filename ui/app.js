@@ -9,6 +9,7 @@ import { TEESHEETS } from "./schema.js";
 const ROOT = document.getElementById("root");
 const NEW_BTN = document.getElementById("new-btn");
 const AWAY_BTN = document.getElementById("away-btn");
+const HELP_BTN = document.getElementById("help-btn");
 const ADMIN_BTN = document.getElementById("admin-btn");
 const SIGNOUT_BTN = document.getElementById("signout-btn");
 const USER_BADGE = document.getElementById("user-badge");
@@ -115,6 +116,7 @@ function triggerDispatch() {
 function setNav({ showNew = false } = {}) {
   NEW_BTN.hidden = !showNew;
   AWAY_BTN.hidden = !(USER && showNew);
+  HELP_BTN.hidden = !(USER && showNew);
   ADMIN_BTN.hidden = !(USER && USER.is_admin && showNew);
   SIGNOUT_BTN.hidden = !USER;
   USER_BADGE.hidden = !USER;
@@ -228,6 +230,12 @@ async function renderList() {
   }
 
   renderTabCards(configs, setsById);
+
+  // First visit per user: auto-open the tour. Skipping or finishing
+  // sets the localStorage flag so it doesn't re-open later.
+  if (USER?.email && !localStorage.getItem(`tour_seen:${USER.email}`)) {
+    setTimeout(() => startTour(), 400);
+  }
 }
 
 function renderTabCards(configs, setsById) {
@@ -1272,6 +1280,172 @@ async function openAwayCalendar() {
   document.body.appendChild(backdrop);
 }
 
+// ----- Interactive tour -------------------------------------------------
+//
+// Step-by-step walkthrough triggered by the Help button, and auto-opened
+// once per user on first sign-in. Each step optionally targets a real DOM
+// element; the overlay dims everything else, the highlight outlines the
+// target, and the tip floats next to it. Steps with `condition: () =>
+// false` are filtered out so the tour skips admin/bug rows for users that
+// don't have them.
+
+function buildTourSteps() {
+  return [
+    {
+      title: "Welcome to sdgolf-monitor",
+      body: "A tee-time monitor for San Diego city courses (Balboa, Torrey Pines) and Coronado. The runner scans every 5 minutes and emails you when matching slots open up. Here's a quick tour — under a minute.",
+    },
+    {
+      selector: "#new-btn",
+      title: "Create a check set",
+      body: "Click <b>+ New subscription</b> to define a check set — courses, date range, time windows, and weekday filters. Each set has its own dedup state, so new matches only email once.",
+    },
+    {
+      selector: ".list-tabs",
+      title: "Mine vs. others",
+      body: "<b>My subscriptions</b> are yours to edit. <b>Other subscriptions</b> shows everyone else's check sets — subscribe to one to share their alerts without duplicating the scan.",
+      condition: () => document.querySelector(".list-tabs") !== null,
+    },
+    {
+      selector: ".check-card",
+      title: "A subscription card",
+      body: "Each card shows current matches under its filter. <b>Click</b> to edit, or <b>drag</b> to reorder. Inside a card, click a date row to expand and see the actual tee times — each time links to the booking page.",
+      condition: () => document.querySelector(".check-card") !== null,
+    },
+    {
+      title: "Time windows + per-date overrides",
+      body: "Inside the editor, each time window has a weekday selector and a <b>Dates</b> button. The calendar lets you <b>include</b> extra days (a Tuesday off) or <b>exclude</b> ones that would otherwise match (a Saturday you're traveling). Both lists save with the check set.",
+    },
+    {
+      selector: "#away-btn",
+      title: "Going on vacation?",
+      body: "<b>Away</b> opens a global calendar that hides matches on the days you're out, both in your inbox and on this dashboard. The runner still scans for other recipients — only your view is filtered.",
+    },
+    {
+      selector: "#bug-fab",
+      title: "Spotted something broken?",
+      body: "The <b>!</b> button in the corner sends a bug report. The current view, your recent client errors, and your email are attached automatically.",
+      condition: () => {
+        const el = document.querySelector("#bug-fab");
+        return el && !el.hidden;
+      },
+    },
+    {
+      selector: "#admin-btn",
+      title: "Admin panel",
+      body: "Manage who's allowed to sign up. Adding an email here queues a welcome message with the signup link, sent automatically on the next scan tick.",
+      condition: () => USER?.is_admin,
+    },
+    {
+      selector: "#help-btn",
+      title: "Tour anytime",
+      body: "Click <b>?</b> any time to walk through these features again. That's it — happy hunting.",
+    },
+  ].filter(s => !s.condition || s.condition());
+}
+
+async function startTour() {
+  if (!USER?.email) return;
+  if (CURRENT_VIEW !== "list") {
+    await renderList();
+  }
+  const steps = buildTourSteps();
+  if (steps.length === 0) return;
+
+  let idx = 0;
+  const overlay = document.createElement("div");
+  overlay.className = "tour-overlay";
+  document.body.appendChild(overlay);
+
+  function close(seen) {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+    window.removeEventListener("resize", reposition);
+    if (seen) localStorage.setItem(`tour_seen:${USER.email}`, "1");
+  }
+  function onKey(e) {
+    if (e.key === "Escape") close(true);
+    else if (e.key === "ArrowRight" || e.key === "Enter") next();
+    else if (e.key === "ArrowLeft") prev();
+  }
+  function next() {
+    idx++;
+    if (idx >= steps.length) return close(true);
+    render();
+  }
+  function prev() {
+    if (idx > 0) idx--;
+    render();
+  }
+  function reposition() { render(); }
+
+  function render() {
+    const step = steps[idx];
+    overlay.innerHTML = "";
+
+    // Backdrop layer dims the page; clicking it closes the tour.
+    const backdrop = document.createElement("div");
+    backdrop.className = "tour-backdrop";
+    backdrop.addEventListener("click", () => close(true));
+    overlay.appendChild(backdrop);
+
+    let target = step.selector ? document.querySelector(step.selector) : null;
+    if (target) {
+      try { target.scrollIntoView({ block: "center", behavior: "instant" }); } catch { /* older browsers */ }
+      const r = target.getBoundingClientRect();
+      const hl = document.createElement("div");
+      hl.className = "tour-highlight";
+      hl.style.top = `${r.top - 6}px`;
+      hl.style.left = `${r.left - 6}px`;
+      hl.style.width = `${r.width + 12}px`;
+      hl.style.height = `${r.height + 12}px`;
+      overlay.appendChild(hl);
+    }
+
+    const tip = document.createElement("section");
+    tip.className = "tour-tip";
+    tip.innerHTML = `
+      <div class="tour-step-count">Step ${idx + 1} of ${steps.length}</div>
+      <h3>${step.title}</h3>
+      <p>${step.body}</p>
+      <footer class="tour-actions">
+        <button type="button" class="tour-skip">Skip tour</button>
+        <button type="button" class="tour-prev" ${idx === 0 ? "disabled" : ""}>Back</button>
+        <button type="button" class="tour-next primary">${idx === steps.length - 1 ? "Done" : "Next"}</button>
+      </footer>
+    `;
+    overlay.appendChild(tip);
+
+    // Position the tip below the target if possible, otherwise above; for
+    // steps without a target, center it.
+    const tipRect = tip.getBoundingClientRect();
+    const pad = 14;
+    if (target) {
+      const r = target.getBoundingClientRect();
+      let top = r.bottom + pad;
+      if (top + tipRect.height > window.innerHeight - pad) {
+        top = r.top - tipRect.height - pad;
+      }
+      if (top < pad) top = pad;
+      let left = r.left + r.width / 2 - tipRect.width / 2;
+      left = Math.max(pad, Math.min(left, window.innerWidth - tipRect.width - pad));
+      tip.style.top = `${top}px`;
+      tip.style.left = `${left}px`;
+    } else {
+      tip.style.top = `${Math.max(pad, (window.innerHeight - tipRect.height) / 2)}px`;
+      tip.style.left = `${Math.max(pad, (window.innerWidth - tipRect.width) / 2)}px`;
+    }
+
+    tip.querySelector(".tour-skip").addEventListener("click", () => close(true));
+    tip.querySelector(".tour-prev").addEventListener("click", prev);
+    tip.querySelector(".tour-next").addEventListener("click", next);
+  }
+
+  document.addEventListener("keydown", onKey);
+  window.addEventListener("resize", reposition);
+  render();
+}
+
 function readForm(form) {
   // booking_class is intentionally omitted from emitted targets — the
   // runner picks the right ForeUp class (929 vs 51735) per-date based
@@ -1587,6 +1761,7 @@ function openBugModal() {
 
 NEW_BTN.addEventListener("click", () => renderEdit(null));
 AWAY_BTN.addEventListener("click", () => openAwayCalendar());
+HELP_BTN.addEventListener("click", () => startTour());
 ADMIN_BTN.addEventListener("click", () => renderAdmin());
 document.getElementById("brand-link").addEventListener("click", () => {
   if (USER) renderList();
