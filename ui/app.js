@@ -294,13 +294,10 @@ function enableReorder(container) {
       const ids = [...container.querySelectorAll(".check-card")]
         .map(c => c.dataset.cfgId)
         .filter(Boolean);
-      // The visible "mine" list can be a subset of USER_ORDER if not every
-      // owned config has been ordered yet — diff against ids that were
-      // actually shown so we don't false-positive an unchanged drag.
-      const shown = ids.join("|");
-      const wasShown = [...USER_ORDER, ...ids.filter(i => !USER_ORDER.includes(i))]
-        .filter(i => ids.includes(i)).join("|");
-      if (shown === wasShown) return;
+      // Skip the round-trip when nothing actually moved. Compare against
+      // the previously persisted order rather than re-deriving the "old"
+      // visible order from the (already-mutated) DOM.
+      if (ids.join("|") === USER_ORDER.join("|")) return;
       const prev = USER_ORDER.slice();
       USER_ORDER = ids;
       try {
