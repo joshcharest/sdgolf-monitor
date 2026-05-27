@@ -90,7 +90,18 @@ def run_check_set(
         # (holes=all) so we get them in one response. Per-slot holes filtering
         # still happens in flt.matches, so we drop the inner loop entirely.
         holes_query: int | str = flt.holes[0] if len(flt.holes) == 1 else "all"
-        for d in dates:
+        horizon = _target_horizon_date(target.provider)
+        target_dates = (
+            dates if horizon is None
+            else [d for d in dates if date.fromisoformat(d) <= horizon]
+        )
+        if horizon is not None and len(target_dates) < len(dates):
+            log.info(
+                "[%s] %s: skipping %d date(s) past %s horizon (%s)",
+                set_name, target.name, len(dates) - len(target_dates),
+                target.provider, horizon.isoformat(),
+            )
+        for d in target_dates:
             t_for_date = _resolve_target_for_date(target, d)
             try:
                 times = client.get_times(t_for_date, d, holes=holes_query)
@@ -249,6 +260,58 @@ def _booking_horizon(now_utc: datetime | None = None) -> date:
     now_pac = (now_utc or datetime.now(tz=ZoneInfo("UTC"))).astimezone(_PACIFIC)
     offset = 7 if now_pac.time() >= _dttime(_BOOKING_RELEASE_HOUR, 0) else 6
     return now_pac.date() + timedelta(days=offset)
+
+
+# How far out each provider lets us book. ForeUp resident class 51735 caps
+# at 90 days; Coronado's TeeItUp tenant advertises maxDaysOut=14 in its SPA
+# config. Dates beyond a target's horizon return empty, so skip the call.
+_PROVIDER_HORIZON_DAYS = {"foreup": 90, "teeitup": 14}
+
+
+def _target_horizon_date(provider: str, *, now_utc: datetime | None = None) -> date | None:
+    """Latest bookable course-local date for a provider, or None if unbounded."""
+    days = _PROVIDER_HORIZON_DAYS.get(provider)
+    if days is None:
+        return None
+    now_pac = (now_utc or datetime.now(tz=ZoneInfo("UTC"))).astimezone(_PACIFIC)
+    return now_pac.date() + timedelta(days=days)
+
+
+class CachingClient:
+    """Per-tick wrapper that folds identical get_times calls into one HTTP call.
+
+    Two check sets scanning the same (teesheet, booking_class, date, holes)
+    used to make the same request twice; with this wrapper they share one
+    result. Scope is intentionally one ``main()`` invocation — instances
+    are constructed fresh each cron tick so cached responses can't go
+    stale across ticks. The underlying client (login state, session
+    cookies) is reused unchanged.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self._cache: dict[tuple, list[TeeTime]] = {}
+        self.hits = 0
+        self.misses = 0
+
+    def get_times(self, target: Target, date_str: str, holes: int | str = 18) -> list[TeeTime]:
+        key = (
+            target.provider,
+            target.teesheet_id,
+            target.booking_class,
+            target.facility_id,
+            target.alias,
+            date_str,
+            holes,
+        )
+        cached = self._cache.get(key)
+        if cached is not None:
+            self.hits += 1
+            return cached
+        self.misses += 1
+        result = self._inner.get_times(target, date_str, holes=holes)
+        self._cache[key] = result
+        return result
 
 
 def _resolve_target_for_date(target: Target, date_str: str) -> Target:
