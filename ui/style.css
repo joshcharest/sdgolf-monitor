@@ -214,6 +214,11 @@ main {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-soft);
   position: relative;
+  /* Explicit low z-index so even when the card's hover transform creates
+   * its own stacking context, it stays under the z-100 sticky header.
+   * Without this, iOS Safari occasionally promoted the card's stacking
+   * context above the header and let titles bleed through during scroll. */
+  z-index: 0;
   overflow: hidden;
   transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
   /* Stagger reveal on first paint */
