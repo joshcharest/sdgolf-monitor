@@ -22,7 +22,7 @@ import requests
 
 from . import autobook, notify
 from .client import ForeUpClient, TeeTime
-from .runner import SmtpCreds, recipients_for, run_check_set
+from .runner import CachingClient, SmtpCreds, recipients_for, run_check_set
 from .teeitup import TeeItUpClient
 
 log = logging.getLogger("sdgolf")
@@ -66,7 +66,12 @@ def main(
 
     client = ForeUpClient()
     client.login(username, password)
-    clients = {"foreup": client, "teeitup": TeeItUpClient()}
+    # CachingClient dedupes identical get_times calls across check sets in
+    # this tick — two configs scanning the same teesheet/date now share
+    # one HTTP response. Fresh wrapper per tick so caches don't persist.
+    foreup_cached = CachingClient(client)
+    teeitup_cached = CachingClient(TeeItUpClient())
+    clients = {"foreup": foreup_cached, "teeitup": teeitup_cached}
     log.info(
         "logged in as %s %s; %d check set(s) to scan",
         client.user["first_name"], client.user["last_name"], len(configs),
@@ -190,6 +195,14 @@ def main(
 
     if autobook_budget is not None:
         autobook.save_state(autobook_state_path, autobook_budget.snapshot())
+
+    total_hits = foreup_cached.hits + teeitup_cached.hits
+    total_misses = foreup_cached.misses + teeitup_cached.misses
+    if total_hits + total_misses:
+        log.info(
+            "request cache: %d hit(s) / %d miss(es) — saved %d HTTP call(s)",
+            total_hits, total_misses, total_hits,
+        )
 
     if snapshot_path:
         reservations = _extract_reservations(client.user or {})

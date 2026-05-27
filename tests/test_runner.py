@@ -479,6 +479,51 @@ def test_runner_omits_recipient_away_when_unset(tmp_path, monkeypatch):
     assert sent[0]["recipient_away"] is None
 
 
+def test_caching_client_dedupes_identical_calls():
+    """Same (target, date, holes) -> one underlying call regardless of repeats."""
+    from sdgolf_monitor.client import Target
+    inner = StubClient(by_target={"A": [{"date": "2026-06-06", "time": "08:00"}]})
+    cached = runner.CachingClient(inner)
+    target = Target(name="A", teesheet_id=1470, booking_class=929, provider="foreup")
+
+    cached.get_times(target, "2026-06-06", holes=18)
+    cached.get_times(target, "2026-06-06", holes=18)
+    cached.get_times(target, "2026-06-06", holes=18)
+
+    assert len(inner.calls) == 1
+    assert cached.hits == 2
+    assert cached.misses == 1
+
+
+def test_caching_client_distinguishes_by_holes():
+    """Different holes values bypass the cache."""
+    from sdgolf_monitor.client import Target
+    inner = StubClient(by_target={"A": [{"date": "2026-06-06", "time": "08:00"}]})
+    cached = runner.CachingClient(inner)
+    target = Target(name="A", teesheet_id=1470, booking_class=929, provider="foreup")
+
+    cached.get_times(target, "2026-06-06", holes=18)
+    cached.get_times(target, "2026-06-06", holes="all")
+
+    assert len(inner.calls) == 2
+    assert cached.misses == 2
+
+
+def test_target_horizon_drops_far_future_dates(monkeypatch):
+    """TeeItUp targets only see dates within 14 days of today (Pacific)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    pac = ZoneInfo("America/Los_Angeles")
+    fake = datetime(2026, 6, 1, 10, 0, tzinfo=pac)
+    monkeypatch.setattr("sdgolf_monitor.runner.datetime", _FakeDatetime(fake))
+
+    h = runner._target_horizon_date("teeitup")
+    assert h.isoformat() == "2026-06-15"  # 2026-06-01 + 14 days
+    h2 = runner._target_horizon_date("foreup")
+    assert h2.isoformat() == "2026-08-30"  # 2026-06-01 + 90 days
+
+
 def test_auto_booking_class_skips_teeitup():
     """TeeItUp targets have no booking class concept; pass through unchanged."""
     from sdgolf_monitor.client import Target
