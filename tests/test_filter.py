@@ -29,6 +29,30 @@ def test_window_weekday_filter():
     assert not w.matches("2026-06-05", "08:00")      # friday
 
 
+def test_window_include_dates_adds_extra_days():
+    sat_sun = parse_weekdays(["sat", "sun"])
+    w = Window("07:00", "11:00", weekdays=sat_sun,
+               include_dates=frozenset({"2026-06-09"}))  # Tuesday
+    assert w.matches("2026-06-09", "08:00")
+    assert w.matches("2026-06-06", "08:00")          # still matches saturday
+    assert not w.matches("2026-06-10", "08:00")      # other tuesday still off
+
+
+def test_window_exclude_dates_skips_matching_days():
+    sat_sun = parse_weekdays(["sat", "sun"])
+    w = Window("07:00", "11:00", weekdays=sat_sun,
+               exclude_dates=frozenset({"2026-06-06"}))  # specific saturday
+    assert not w.matches("2026-06-06", "08:00")
+    assert w.matches("2026-06-07", "08:00")          # next day still on
+
+
+def test_window_exclude_wins_over_include():
+    w = Window("07:00", "11:00",
+               include_dates=frozenset({"2026-06-09"}),
+               exclude_dates=frozenset({"2026-06-09"}))
+    assert not w.matches("2026-06-09", "08:00")
+
+
 def test_filter_min_players():
     f = Filter(min_players=3, max_green_fee=None, holes=(18,),
                windows=(Window("06:00", "20:00"),))
