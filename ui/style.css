@@ -1193,7 +1193,6 @@ form .hint code {
 .w-cal:hover { color: var(--text); border-color: var(--text-dim); }
 .w-cal.active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
 
-.modal-backdrop > .modal.cal-modal { max-width: 420px; }
 .cal-header {
   display: flex; align-items: center; justify-content: center;
   gap: 14px;
