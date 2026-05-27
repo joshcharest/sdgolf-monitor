@@ -1498,7 +1498,13 @@ async function startTour() {
   function ensureTab(tab) {
     if (!tab) return;
     const el = document.querySelector(`.list-tab[data-filter="${tab}"]`);
-    if (el && !el.classList.contains("active")) el.click();
+    if (!el || el.classList.contains("active")) return;
+    // Only switch if the destination tab actually has something to show;
+    // landing on an empty tab during a highlight step is worse than
+    // staying on the previous tab. The tab label includes a "(N)" count.
+    const m = (el.textContent || "").match(/\((\d+)\)/);
+    if (m && parseInt(m[1], 10) === 0) return;
+    el.click();
   }
 
   async function render() {
