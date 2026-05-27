@@ -1466,21 +1466,11 @@ async function startTour() {
     if (!target) return;
     const r = target.getBoundingClientRect();
     const vw = window.innerWidth, vh = window.innerHeight;
-    const isMobile = vw < 720;
-    const SAFE = 12, TIP = 240;
-    // Mirror the tip-side decision so the reserved zone stays on the
-    // tip's side as the page scrolls.
-    let tipAtTop = false;
-    if (isMobile) {
-      const cs = getComputedStyle(target);
-      if (cs.position === "fixed") tipAtTop = (r.top + r.bottom) / 2 > vh / 2;
-    }
-    const topReserve = isMobile && tipAtTop ? TIP : SAFE;
-    const bottomReserve = isMobile && !tipAtTop ? TIP : SAFE;
-    const top = Math.max(topReserve, r.top - 6);
+    const SAFE = 12;
+    const top = Math.max(SAFE, r.top - 6);
     const left = Math.max(SAFE, r.left - 6);
     const right = Math.min(vw - SAFE, r.right + 6);
-    const bottom = Math.min(vh - bottomReserve, r.bottom + 6);
+    const bottom = Math.min(vh - SAFE, r.bottom + 6);
     hl.style.top = `${top}px`;
     hl.style.left = `${left}px`;
     hl.style.width = `${Math.max(0, right - left)}px`;
@@ -1565,17 +1555,16 @@ async function startTour() {
       const r = target.getBoundingClientRect();
       // Clamp the highlight to the viewport so a target taller than the
       // window doesn't draw a ring above or below the visible area.
-      // On mobile reserve ~240px at whichever side the tip is pinned to
-      // (bottom by default; top when the target sits in the lower half).
+      // We don't carve out space for the bottom-pinned tip — the
+      // highlight extends across the full feature, and the tip simply
+      // overlays the lower portion of it (its card chrome stays clearly
+      // distinct from the feature underneath).
       const vw = window.innerWidth, vh = window.innerHeight;
       const SAFE = 12;
-      const TIP = 240;
-      const topReserve = isMobile && tipAtTop ? TIP : SAFE;
-      const bottomReserve = isMobile && !tipAtTop ? TIP : SAFE;
-      const top = Math.max(topReserve, r.top - 6);
+      const top = Math.max(SAFE, r.top - 6);
       const left = Math.max(SAFE, r.left - 6);
       const right = Math.min(vw - SAFE, r.right + 6);
-      const bottom = Math.min(vh - bottomReserve, r.bottom + 6);
+      const bottom = Math.min(vh - SAFE, r.bottom + 6);
       const hl = document.createElement("div");
       hl.className = "tour-highlight";
       hl.style.top = `${top}px`;
