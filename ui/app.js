@@ -839,7 +839,11 @@ function renderEdit(existingId) {
   for (const w of cfg.filter?.windows || []) windowsList.appendChild(buildWindowRow(w));
   document.getElementById("add-window").addEventListener("click", () => {
     windowsList.appendChild(buildWindowRow({ start: "07:00", end: "11:00", weekdays: [] }));
+    applyWeekdayConstraints(form);
   });
+  // Apply the initial weekday constraint once the rows are in place — date
+  // inputs have been set up by this point so the range resolves correctly.
+  applyWeekdayConstraints(form);
 
   if (USER?.is_admin) {
     const ab = document.getElementById("autobook-fieldset");
@@ -924,13 +928,51 @@ function setupDateInput(form, which, spec) {
     relativeInput.value = spec || (which === "start" ? "today" : "today+90");
   }
   applyDateMode(modeSel, relativeInput, specificInput);
-  modeSel.addEventListener("change", () => applyDateMode(modeSel, relativeInput, specificInput));
+  const reapply = () => applyWeekdayConstraints(form);
+  modeSel.addEventListener("change", () => { applyDateMode(modeSel, relativeInput, specificInput); reapply(); });
+  // Both inputs may participate even when hidden — listen on both so any
+  // edit refreshes the weekday constraint immediately.
+  for (const input of [relativeInput, specificInput]) {
+    input.addEventListener("input", reapply);
+    input.addEventListener("change", reapply);
+  }
 }
 
 function applyDateMode(modeSel, relativeInput, specificInput) {
   const isSpecific = modeSel.value === "specific";
   relativeInput.hidden = isSpecific;
   specificInput.hidden = !isSpecific;
+}
+
+// Compute which weekday names actually appear in the date range, returning
+// null when the range either spans 7+ days (all weekdays possible) or can't
+// be resolved (invalid input). null means "no constraint — leave all on".
+function weekdaysInRange(start, end) {
+  if (!start || !end || start > end) return null;
+  const days = Math.round((end - start) / 86400000) + 1;
+  if (days >= 7) return null;
+  const wd = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  const out = new Set();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start.getTime() + i * 86400000);
+    out.add(wd[d.getUTCDay()]);
+  }
+  return out;
+}
+
+function applyWeekdayConstraints(form) {
+  if (!form) return;
+  const [start, end] = readFormDateRange(form);
+  const allowed = weekdaysInRange(start, end);
+  for (const row of form.querySelectorAll(".window-row")) {
+    for (const cb of row.querySelectorAll(".weekdays input")) {
+      const ok = !allowed || allowed.has(cb.value);
+      cb.disabled = !ok;
+      if (!ok) cb.checked = false;
+      const label = cb.closest("label");
+      if (label) label.classList.toggle("wd-disabled", !ok);
+    }
+  }
 }
 
 function buildWindowRow(w) {
