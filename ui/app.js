@@ -407,7 +407,9 @@ function renderCard(cfg, snapshotEntry) {
   const node = document.getElementById("card").content.cloneNode(true);
   const article = node.querySelector("article");
   article.dataset.cfgId = cfg.id;
-  article.querySelector(".card-name").textContent = cfg.name;
+  const nameEl = article.querySelector(".card-name");
+  nameEl.textContent = cfg.name;
+  nameEl.title = cfg.name;  // full name on hover when CSS truncates with ellipsis
   const ownerEl = article.querySelector(".card-owner");
   ownerEl.textContent = cfg.owner === USER.email ? "yours" : `by ${cfg.owner}`;
   ownerEl.classList.toggle("mine", cfg.owner === USER.email);
@@ -1376,6 +1378,7 @@ function buildTourSteps() {
     },
     {
       view: "list",
+      tab: "others",
       selector: ".check-card",
       title: "A subscription card",
       body: "Shows current matches under that subscription's filter. Click a date row to expand the tee times. On <b>your own cards</b>, click to edit or drag to reorder; on <b>others'</b>, click <b>Subscribe</b>.",
@@ -1463,9 +1466,18 @@ async function startTour() {
     if (!target) return;
     const r = target.getBoundingClientRect();
     const vw = window.innerWidth, vh = window.innerHeight;
-    const SAFE = 12;
-    const bottomReserve = window.innerWidth < 720 ? 240 : SAFE;
-    const top = Math.max(SAFE, r.top - 6);
+    const isMobile = vw < 720;
+    const SAFE = 12, TIP = 240;
+    // Mirror the tip-side decision so the reserved zone stays on the
+    // tip's side as the page scrolls.
+    let tipAtTop = false;
+    if (isMobile) {
+      const cs = getComputedStyle(target);
+      if (cs.position === "fixed") tipAtTop = (r.top + r.bottom) / 2 > vh / 2;
+    }
+    const topReserve = isMobile && tipAtTop ? TIP : SAFE;
+    const bottomReserve = isMobile && !tipAtTop ? TIP : SAFE;
+    const top = Math.max(topReserve, r.top - 6);
     const left = Math.max(SAFE, r.left - 6);
     const right = Math.min(vw - SAFE, r.right + 6);
     const bottom = Math.min(vh - bottomReserve, r.bottom + 6);
@@ -1502,16 +1514,35 @@ async function startTour() {
 
     let target = step.selector ? document.querySelector(step.selector) : null;
     const isMobile = window.innerWidth < 720;
+
+    // Whether to bottom-pin the tip (default) or top-pin it. A target
+    // already in the lower half of the viewport (e.g. the fixed bug FAB)
+    // gets the tip up top so the FAB stays visible. Decided here so the
+    // scroll step below knows which half to land the target in.
+    const tipAtTop = (() => {
+      if (!isMobile || !target) return false;
+      const cs = getComputedStyle(target);
+      const r = target.getBoundingClientRect();
+      const centerY = (r.top + r.bottom) / 2;
+      // Fixed targets keep their viewport position regardless of scroll.
+      if (cs.position === "fixed") return centerY > window.innerHeight / 2;
+      return false;
+    })();
+
     if (target) {
-      // On mobile we'll bottom-pin the tip; scroll the target so its
-      // middle sits in the upper half of the viewport (above where the
-      // tip will land). On desktop, center it normally.
-      const block = isMobile ? "start" : "center";
-      try { target.scrollIntoView({ block, behavior: "instant" }); } catch { /* older browsers */ }
-      if (isMobile) {
-        // scrollIntoView({block:"start"}) puts target.top at viewport top.
-        // Nudge down ~16px so the highlight ring has a clean inset.
-        window.scrollBy({ top: -16, behavior: "instant" });
+      const cs = getComputedStyle(target);
+      const isFixedTarget = cs.position === "fixed";
+      if (!isFixedTarget) {
+        const block = isMobile ? "start" : "center";
+        try { target.scrollIntoView({ block, behavior: "instant" }); } catch { /* older browsers */ }
+        if (isMobile) {
+          // scrollIntoView ignores the sticky page header, so the target
+          // ends up under it. Scroll the page down by the header height
+          // plus a small inset so the highlight ring clears it cleanly.
+          const header = document.querySelector("header");
+          const headerH = header ? header.offsetHeight : 0;
+          window.scrollBy({ top: -(headerH + 12), behavior: "instant" });
+        }
       }
     }
 
@@ -1528,13 +1559,14 @@ async function startTour() {
       const r = target.getBoundingClientRect();
       // Clamp the highlight to the viewport so a target taller than the
       // window doesn't draw a ring above or below the visible area.
-      // On mobile the tip is bottom-pinned, so reserve ~240px at the
-      // bottom for it — the highlight stops above the tip rather than
-      // overlapping it.
+      // On mobile reserve ~240px at whichever side the tip is pinned to
+      // (bottom by default; top when the target sits in the lower half).
       const vw = window.innerWidth, vh = window.innerHeight;
       const SAFE = 12;
-      const bottomReserve = isMobile ? 240 : SAFE;
-      const top = Math.max(SAFE, r.top - 6);
+      const TIP = 240;
+      const topReserve = isMobile && tipAtTop ? TIP : SAFE;
+      const bottomReserve = isMobile && !tipAtTop ? TIP : SAFE;
+      const top = Math.max(topReserve, r.top - 6);
       const left = Math.max(SAFE, r.left - 6);
       const right = Math.min(vw - SAFE, r.right + 6);
       const bottom = Math.min(vh - bottomReserve, r.bottom + 6);
@@ -1568,10 +1600,15 @@ async function startTour() {
     if (isMobile) {
       tip.style.left = `${pad}px`;
       tip.style.right = `${pad}px`;
-      tip.style.bottom = `${pad}px`;
-      tip.style.top = "auto";
       tip.style.width = "auto";
       tip.style.maxWidth = "none";
+      if (tipAtTop) {
+        tip.style.top = `${pad}px`;
+        tip.style.bottom = "auto";
+      } else {
+        tip.style.bottom = `${pad}px`;
+        tip.style.top = "auto";
+      }
     } else {
       const tipRect = tip.getBoundingClientRect();
       const vw = window.innerWidth, vh = window.innerHeight;

@@ -315,10 +315,13 @@ main {
   color: var(--text);
   font-variation-settings: 'opsz' 60, 'SOFT' 40;
   min-width: 0;
-  /* The matches chip shares the row, so allow wrapping for very long names
-   * rather than truncating them. */
-  overflow-wrap: anywhere;
   line-height: 1.2;
+  /* Keep the name on a single line; truncate with an ellipsis when it
+   * would otherwise wrap. The full name lives in the title attribute on
+   * hover via app.js. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .check-card .card-desc { display: none; }
