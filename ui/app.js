@@ -1311,19 +1311,13 @@ function buildTourSteps() {
       view: "edit",
       selector: "#courses-fs",
       title: "Courses",
-      body: "Tick any combination — a single check set can mix courses. At least one is required. Want to add a course not listed here? Let me know.",
+      body: "Tick any combination — a single check set can mix courses. At least one is required.",
     },
     {
       view: "edit",
       selector: "#dates-fs",
       title: "Date range",
       body: "Each side has a <b>Relative/Specific</b> dropdown. Relative accepts <code>today</code> or <code>today+N</code> (rolls forward every tick — great for \"always next 90 days\"). Specific uses your browser's calendar picker for one-off targets.",
-    },
-    {
-      view: "edit",
-      selector: "#filter-fs",
-      title: "Filter",
-      body: "<b>Holes</b> — 9, 18, or Both. <b>Min players</b> — minimum open spots a slot needs to count as a match. Set min players to 4 if you only care about foursomes.",
     },
     {
       view: "edit",
@@ -1339,9 +1333,10 @@ function buildTourSteps() {
     },
     {
       view: "list",
+      tab: "others",
       selector: ".check-card",
       title: "A subscription card",
-      body: "Each card shows current matches under its filter. <b>Click</b> to edit, or <b>drag</b> to reorder. Inside a card, click a date row to expand and see the actual tee times — each time links to the booking page.",
+      body: "Each card shows current matches under that subscription's filter. On <b>others' cards</b>, click <b>Subscribe</b> to start getting their email alerts. On <b>your own cards</b>, click to edit or drag to reorder. Either way, click a date row inside the card to expand the actual tee times — each time links to the booking page.",
       condition: () => document.querySelector(".check-card") !== null,
     },
     {
@@ -1423,6 +1418,12 @@ async function startTour() {
     }
   }
 
+  function ensureTab(tab) {
+    if (!tab) return;
+    const el = document.querySelector(`.list-tab[data-filter="${tab}"]`);
+    if (el && !el.classList.contains("active")) el.click();
+  }
+
   async function render() {
     const step = steps[idx];
 
@@ -1430,6 +1431,7 @@ async function startTour() {
     // visible during the await on renderList(), rather than flashing the
     // backdrop empty (which broke click targeting in the brief gap).
     if (step.view) await ensureView(step.view);
+    if (step.tab) ensureTab(step.tab);
 
     overlay.innerHTML = "";
 
