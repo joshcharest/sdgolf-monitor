@@ -26,6 +26,9 @@ class StubClient:
         return self.user
 
     def get_times(self, target, date, holes=18):
+        # Real runner now passes holes="all" for mixed-holes filters and
+        # lets per-slot filtering happen downstream; ignore the param and
+        # default each row to 18 unless explicitly set.
         self.calls.append((target.name, date))
         rows = self._by_target.get(target.name, [])
         return [
@@ -34,7 +37,7 @@ class StubClient:
                 date=r["date"],
                 time=r["time"],
                 available_spots=r.get("spots", 4),
-                holes=r.get("holes", holes),
+                holes=r.get("holes", 18),
                 green_fee=r.get("fee", 50.0),
                 booking_fee=r.get("booking_fee"),
             )

@@ -43,7 +43,8 @@ class TeeItUpClient:
             "Accept": "application/json",
         })
 
-    def get_times(self, target: Target, date: str, holes: int = 18) -> list[TeeTime]:
+    def get_times(self, target: Target, date: str, holes: int | str = 18) -> list[TeeTime]:
+        """Fetch tee times. ``holes`` is 9, 18, or "all" (no filter)."""
         if target.facility_id is None or not target.alias:
             raise ValueError(f"teeitup target {target.name!r} missing facility_id/alias")
         resp = self.session.get(
@@ -65,7 +66,9 @@ class TeeItUpClient:
                 continue
             for raw in facility.get("teetimes") or []:
                 tt = _record_to_teetime(raw, target.name)
-                if tt is not None and tt.holes == holes:
+                if tt is None:
+                    continue
+                if holes == "all" or tt.holes == holes:
                     out.append(tt)
         return out
 

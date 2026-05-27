@@ -108,13 +108,14 @@ class ForeUpClient:
         self.user = body
         return body
 
-    def get_times(self, target: Target, date: str, holes: int = 18) -> list[TeeTime]:
+    def get_times(self, target: Target, date: str, holes: int | str = 18) -> list[TeeTime]:
         """Fetch tee times for a target on a given date.
 
         Args:
             target: Course + booking class to query.
             date: "YYYY-MM-DD".
-            holes: 9 or 18.
+            holes: 9, 18, or "all" (returns both 9 and 18 hole slots in one
+                response — same as the booking SPA's "Both" toggle).
         """
         y, m, d = date.split("-")
         params = {
