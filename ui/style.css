@@ -1287,16 +1287,20 @@ form .hint code {
 }
 .tour-backdrop {
   position: absolute; inset: 0;
-  background: rgba(0, 0, 0, 0.62);
-  backdrop-filter: blur(2px);
+  /* Background is set inline per step — dim for no-target steps,
+   * transparent when a spotlight is providing the dim via box-shadow. */
   cursor: pointer;
 }
 .tour-highlight {
   position: absolute;
   border: 2px solid var(--accent);
   border-radius: 10px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent),
-              0 0 0 9999px rgba(0, 0, 0, 0.05);
+  /* The huge box-shadow IS the dim — it punches a hole at the target's
+   * rect while filling everything else with a dark scrim. No stacking
+   * context tricks needed; the target keeps its natural z-index and
+   * stays fully sharp inside the cutout. */
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent),
+              0 0 0 9999px rgba(0, 0, 0, 0.62);
   pointer-events: none;
   transition: top 0.18s, left 0.18s, width 0.18s, height 0.18s;
 }
