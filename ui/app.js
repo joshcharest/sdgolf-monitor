@@ -1433,6 +1433,7 @@ async function startTour() {
     overlay.remove();
     document.removeEventListener("keydown", onKey);
     window.removeEventListener("resize", reposition);
+    window.removeEventListener("scroll", syncHighlight, true);
     if (seen) localStorage.setItem(`tour_seen:${USER.email}`, "1");
   }
   function onKey(e) {
@@ -1450,6 +1451,29 @@ async function startTour() {
     await render();
   }
   function reposition() { render(); }
+
+  // Lightweight scroll handler: just re-clamp the highlight rect to the
+  // target's current viewport position. Without this, the highlight
+  // stays pinned to its initial coords while the target scrolls away.
+  function syncHighlight() {
+    const hl = overlay.querySelector(".tour-highlight");
+    const step = steps[idx];
+    if (!hl || !step?.selector) return;
+    const target = document.querySelector(step.selector);
+    if (!target) return;
+    const r = target.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const SAFE = 12;
+    const bottomReserve = window.innerWidth < 720 ? 240 : SAFE;
+    const top = Math.max(SAFE, r.top - 6);
+    const left = Math.max(SAFE, r.left - 6);
+    const right = Math.min(vw - SAFE, r.right + 6);
+    const bottom = Math.min(vh - bottomReserve, r.bottom + 6);
+    hl.style.top = `${top}px`;
+    hl.style.left = `${left}px`;
+    hl.style.width = `${Math.max(0, right - left)}px`;
+    hl.style.height = `${Math.max(0, bottom - top)}px`;
+  }
 
   async function ensureView(view) {
     if (view === "edit" && !CURRENT_VIEW.startsWith("edit")) {
@@ -1590,6 +1614,10 @@ async function startTour() {
 
   document.addEventListener("keydown", onKey);
   window.addEventListener("resize", reposition);
+  // capture: true catches scroll events from any scrolling ancestor,
+  // not just window — important when the page itself doesn't scroll
+  // but an inner container does.
+  window.addEventListener("scroll", syncHighlight, { passive: true, capture: true });
   await render();
 }
 
