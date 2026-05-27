@@ -1266,6 +1266,79 @@ form .hint code {
 .cal-sw.cal-in { background: color-mix(in srgb, #22c55e 30%, transparent); border-color: #22c55e; }
 .cal-sw.cal-ex { background: color-mix(in srgb, #ef4444 25%, transparent); border-color: #ef4444; }
 
+/* ---------- Interactive tour ----------------------------------------- */
+
+#help-btn {
+  width: 30px; height: 30px;
+  padding: 0;
+  font-size: 14px; font-weight: 600;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: 50%;
+  cursor: pointer;
+}
+#help-btn:hover { color: var(--text); border-color: var(--text-dim); }
+
+.tour-overlay {
+  position: fixed; inset: 0;
+  z-index: 250;
+  animation: tour-fade 0.16s ease-out;
+}
+.tour-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(2px);
+  cursor: pointer;
+}
+.tour-highlight {
+  position: absolute;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent),
+              0 0 0 9999px rgba(0, 0, 0, 0.05);
+  pointer-events: none;
+  transition: top 0.18s, left 0.18s, width 0.18s, height 0.18s;
+}
+.tour-tip {
+  position: absolute;
+  max-width: 340px;
+  width: calc(100vw - 28px);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.tour-step-count {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.tour-tip h3 { margin: 0 0 8px; font-size: 16px; font-weight: 500; }
+.tour-tip p { margin: 0 0 14px; font-size: 13px; line-height: 1.5; color: var(--text); }
+.tour-tip p b { color: var(--accent); font-weight: 500; }
+.tour-actions {
+  display: flex; gap: 8px; align-items: center;
+}
+.tour-actions button {
+  padding: 6px 14px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.tour-actions .tour-skip {
+  margin-right: auto;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.tour-actions .tour-skip:hover { color: var(--text-dim); }
+.tour-actions .tour-prev:disabled { opacity: 0.35; cursor: not-allowed; }
+@keyframes tour-fade { from { opacity: 0; } to { opacity: 1; } }
+
 /* ---------- Responsive ------------------------------------------------ */
 
 @media (max-width: 720px) {
