@@ -1190,14 +1190,18 @@ form .hint code {
 /* ---------- Window date-override calendar ----------------------------- */
 
 .w-cal {
-  padding: 4px 10px;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 8px;
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--text-dim);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1;
   cursor: pointer;
 }
+.w-cal svg { display: block; }
+.w-cal .w-cal-count:empty { display: none; }
 .w-cal:hover { color: var(--text); border-color: var(--text-dim); }
 .w-cal.active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
 
@@ -1411,6 +1415,17 @@ form .hint code {
   .cal-grid { gap: 3px; }
   .cal-day { font-size: 12px; border-radius: 4px; }
   .cal-modal h3 { font-size: 15px; }
+
+  /* Tour tip is bottom-pinned in JS on mobile; this keeps the content
+   * compact enough to leave most of the screen for the highlight above. */
+  .tour-tip {
+    padding: 12px 14px 10px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .tour-tip h3 { font-size: 14.5px; margin: 0 0 6px; }
+  .tour-tip p { font-size: 12.5px; line-height: 1.4; margin: 0 0 10px; }
+  .tour-step-count { font-size: 9.5px; margin-bottom: 4px; }
 
   form fieldset { padding: 12px 14px 14px; margin: 14px 0; }
   form label.inline { margin: 8px 12px 8px 0; }
