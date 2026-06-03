@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -114,7 +115,11 @@ def test_per_set_state_files_are_isolated(tmp_path, monkeypatch):
     sent: list[dict] = []
     monkeypatch.setattr(runner.notify, "send_email", lambda **kw: sent.append(kw))
 
-    rows = [{"date": "2026-06-01", "time": "08:00"}]
+    # Use a future date so state.save's _prune_past doesn't strip the slot
+    # (it drops keys whose date is before today). A hardcoded date would make
+    # this test start failing the moment that date goes stale.
+    slot_date = (date.today() + timedelta(days=2)).isoformat()
+    rows = [{"date": slot_date, "time": "08:00"}]
     client = StubClient(by_target={"A": rows})
     smtp = runner.SmtpCreds(user="u", password="p")
 
@@ -131,7 +136,7 @@ def test_per_set_state_files_are_isolated(tmp_path, monkeypatch):
         set_name="beta", dry_run=False, smtp=smtp,
     )
     beta_state = json.loads((state_dir / "beta.json").read_text())
-    assert any("A|2026-06-01|08:00" in k for k in beta_state)
+    assert any(f"A|{slot_date}|08:00" in k for k in beta_state)
     # Alpha's file was never created — state lives per-set, not shared
     assert not (state_dir / "alpha.json").exists()
     assert len(sent) == 1 and sent[0]["set_name"] == "beta"
