@@ -81,14 +81,39 @@ _COURSE_IDS = {
     "Torrey Pines South": (19347, 1487),
 }
 
+# TeeItUp courses keyed by target name -> (course/facility id, alias subdomain).
+# The booking SPA lives at ``<alias>.book.teeitup.com`` and takes the course id
+# as its ``?course=`` param. Mirror of the teeitup entries in ui/schema.js
+# TEESHEETS — keep in sync.
+_TEEITUP_COURSES = {
+    "Coronado (3-14d)": (10985, "coronado-gc-3-14-be"),
+}
+
+
+def _is_iso_date(s: str) -> bool:
+    try:
+        date.fromisoformat(s)
+        return True
+    except ValueError:
+        return False
+
 
 def _booking_url(target: str, date_iso: str) -> str | None:
-    """ForeUp deep-link for one slot, or None if we can't construct one.
+    """Booking deep-link for one slot, or None if we can't construct one.
 
-    Booking class 929 = resident 0-7 day; 51735 = resident 8-90 day. Decide
-    based on the slot's date, not the API's booking_fee flag (which is
-    unreliable for Torrey under 929).
+    TeeItUp courses (Coronado) link to their booking SPA, which lands on the
+    given date with the price filter wide open. ForeUp courses link to the
+    ForeUp SPA: booking class 929 = resident 0-7 day, 51735 = resident
+    8-90 day, decided by the slot's date (not the API's booking_fee flag,
+    which is unreliable for Torrey under 929).
     """
+    teeitup = _TEEITUP_COURSES.get(target)
+    if teeitup:
+        course_id, alias = teeitup
+        params = f"course={course_id}&max=999999"
+        if _is_iso_date(date_iso):
+            params += f"&date={date_iso}"
+        return f"https://{alias}.book.teeitup.com/?{params}"
     ids = _COURSE_IDS.get(target)
     if not ids:
         return None
@@ -659,7 +684,8 @@ def _plaintext(
         )
         url = _booking_url(tt.target, tt.date)
         if url:
-            lines.append(f"    Open in ForeUp: {url}")
+            vendor = "TeeItUp" if tt.target in _TEEITUP_COURSES else "ForeUp"
+            lines.append(f"    Open in {vendor}: {url}")
         book_url = (book_urls or {}).get(tt.key)
         if book_url:
             lines.append(f"    Book now (one click): {book_url}")
