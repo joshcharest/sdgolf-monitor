@@ -629,8 +629,8 @@ def _subject(set_name: str, new_times: list[TeeTime]) -> str:
     earliest = min(new_times, key=lambda t: (t.date, t.time, t.target))
     headline = _slot_subject_line(earliest)
     if len(new_times) == 1:
-        return headline
-    return f"{headline} (+{len(new_times) - 1} more)"
+        return f"{set_name}: {headline}"
+    return f"{set_name}: {headline} (+{len(new_times) - 1} more)"
 
 
 def _slot_subject_line(tt: TeeTime) -> str:
