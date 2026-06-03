@@ -16,12 +16,23 @@ Discovery notes:
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import requests
 
 BASE = "https://foreupsoftware.com"
+
+log = logging.getLogger("sdgolf")
+
+# ForeUp's edge/WAF intermittently 403s (and occasionally 429s or 5xxs)
+# requests from shared CI runner IPs. These blocks are transient — a retry a
+# few seconds later almost always succeeds — so login() retries them rather
+# than crashing the whole monitor tick. Backoff is the gap *before* each retry.
+LOGIN_RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
+LOGIN_RETRY_BACKOFF = (2.0, 5.0)  # len + 1 = total attempts
 
 
 @dataclass(frozen=True)
@@ -73,12 +84,45 @@ class ForeUpClient:
         })
         self.user: dict[str, Any] | None = None
 
-    def login(self, username: str, password: str, booking_class: int = 929) -> dict[str, Any]:
+    def login(
+        self,
+        username: str,
+        password: str,
+        booking_class: int = 929,
+        *,
+        sleep: "callable[[float], None]" = time.sleep,
+    ) -> dict[str, Any]:
         """Authenticate. Returns the user object (includes booking_class_ids, jwt).
 
         ``booking_class`` here is only used to satisfy the login form; the same
         cookie/JWT then unlocks every booking class the user is entitled to.
+
+        Transient edge failures (403/429/5xx, timeouts, connection drops) are
+        retried with backoff — see ``LOGIN_RETRY_BACKOFF``. A genuine rejection
+        (bad password → 200 with ``success: false``) is not retried.
         """
+        last_exc: ForeUpAuthError | None = None
+        for attempt, backoff in enumerate((*LOGIN_RETRY_BACKOFF, None)):
+            try:
+                return self._login_once(username, password, booking_class)
+            except (ForeUpAuthError, requests.RequestException) as exc:
+                # Only retry transient edge failures; surface real rejections.
+                status = getattr(exc, "status_code", None)
+                transient = isinstance(exc, requests.RequestException) or (
+                    status in LOGIN_RETRY_STATUSES
+                )
+                if not transient or backoff is None:
+                    raise
+                last_exc = exc if isinstance(exc, ForeUpAuthError) else None
+                log.warning(
+                    "login attempt %d failed (%s); retrying in %.0fs",
+                    attempt + 1, exc, backoff,
+                )
+                sleep(backoff)
+        # Unreachable: the final iteration has backoff=None and re-raises.
+        raise last_exc or ForeUpAuthError("login failed")
+
+    def _login_once(self, username: str, password: str, booking_class: int) -> dict[str, Any]:
         self.session.get(
             f"{BASE}/index.php/booking/{self.primary_course_id}/{booking_class}",
             timeout=20,
@@ -95,7 +139,9 @@ class ForeUpClient:
             timeout=20,
         )
         if resp.status_code != 200:
-            raise ForeUpAuthError(f"login http {resp.status_code}: {resp.text[:200]}")
+            err = ForeUpAuthError(f"login http {resp.status_code}: {resp.text[:200]}")
+            err.status_code = resp.status_code
+            raise err
         try:
             body = resp.json()
         except ValueError:
