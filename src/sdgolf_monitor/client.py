@@ -17,6 +17,7 @@ Discovery notes:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -33,6 +34,20 @@ log = logging.getLogger("sdgolf")
 # than crashing the whole monitor tick. Backoff is the gap *before* each retry.
 LOGIN_RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
 LOGIN_RETRY_BACKOFF = (2.0, 5.0)  # len + 1 = total attempts
+
+
+def is_transient_login_error(exc: Exception) -> bool:
+    """True if a login failure looks like a transient edge/WAF block.
+
+    Distinguishes a block worth retrying / skipping the tick over (403/429/5xx
+    from the WAF, a dropped connection — all clear on a later attempt, often
+    just a fresh source IP) from a genuine rejection (bad password → 200 with
+    ``success: false``, or a non-JSON body) that won't self-heal and should
+    surface loudly. Genuine rejections carry no retryable ``status_code``.
+    """
+    if isinstance(exc, requests.RequestException):
+        return True
+    return getattr(exc, "status_code", None) in LOGIN_RETRY_STATUSES
 
 
 @dataclass(frozen=True)
@@ -73,8 +88,24 @@ class ForeUpAuthError(RuntimeError):
 class ForeUpClient:
     """Authenticated HTTP client for the ForeUp booking API."""
 
-    def __init__(self, primary_course_id: int = 19348):
+    def __init__(
+        self,
+        primary_course_id: int = 19348,
+        *,
+        base: str | None = None,
+        proxy_secret: str | None = None,
+    ):
+        """Talk to ForeUp directly, or tunnel through the Worker proxy.
+
+        ForeUp's WAF 403s a chunk of GitHub's shared runner IPs. Set
+        ``FOREUP_PROXY_URL`` (e.g. ``https://<worker>/api/internal/foreup``) to
+        route every call through the Worker's better-reputation egress instead.
+        When proxying, the runner authenticates to the Worker with
+        ``RUNNER_SECRET`` via a Bearer header; the Worker strips it before
+        forwarding. Unset → direct to ForeUp (used by tests and discovery).
+        """
         self.primary_course_id = primary_course_id
+        self.base = (base or os.environ.get("FOREUP_PROXY_URL") or BASE).rstrip("/")
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
@@ -82,6 +113,9 @@ class ForeUpClient:
             "X-Requested-With": "XMLHttpRequest",
             "Api-Key": "no_limits",
         })
+        secret = proxy_secret or os.environ.get("RUNNER_SECRET")
+        if self.base != BASE and secret:
+            self.session.headers["Authorization"] = f"Bearer {secret}"
         self.user: dict[str, Any] | None = None
 
     def login(
@@ -107,11 +141,7 @@ class ForeUpClient:
                 return self._login_once(username, password, booking_class)
             except (ForeUpAuthError, requests.RequestException) as exc:
                 # Only retry transient edge failures; surface real rejections.
-                status = getattr(exc, "status_code", None)
-                transient = isinstance(exc, requests.RequestException) or (
-                    status in LOGIN_RETRY_STATUSES
-                )
-                if not transient or backoff is None:
+                if not is_transient_login_error(exc) or backoff is None:
                     raise
                 last_exc = exc if isinstance(exc, ForeUpAuthError) else None
                 log.warning(
@@ -124,11 +154,11 @@ class ForeUpClient:
 
     def _login_once(self, username: str, password: str, booking_class: int) -> dict[str, Any]:
         self.session.get(
-            f"{BASE}/index.php/booking/{self.primary_course_id}/{booking_class}",
+            f"{self.base}/index.php/booking/{self.primary_course_id}/{booking_class}",
             timeout=20,
         )
         resp = self.session.post(
-            f"{BASE}/index.php/api/booking/users/login",
+            f"{self.base}/index.php/api/booking/users/login",
             data={
                 "username": username,
                 "password": password,
@@ -176,7 +206,7 @@ class ForeUpClient:
             "api_key": "no_limits",
         }
         resp = self.session.get(
-            f"{BASE}/index.php/api/booking/times",
+            f"{self.base}/index.php/api/booking/times",
             params=params,
             timeout=20,
         )

@@ -21,7 +21,7 @@ from typing import Any
 import requests
 
 from . import autobook, notify
-from .client import ForeUpClient, TeeTime
+from .client import ForeUpAuthError, ForeUpClient, TeeTime, is_transient_login_error
 from .runner import CachingClient, SmtpCreds, recipients_for, run_check_set
 from .teeitup import TeeItUpClient
 
@@ -67,7 +67,19 @@ def main(
         )
 
     client = ForeUpClient()
-    client.login(username, password)
+    try:
+        client.login(username, password)
+    except (ForeUpAuthError, requests.RequestException) as exc:
+        # A genuine rejection (bad password) won't self-heal — fail loudly so
+        # it gets noticed. A transient WAF block on this runner's IP, on the
+        # other hand, clears on the next 5-min tick (fresh runner), so skip
+        # this tick rather than crash. Deliberately do NOT write a snapshot:
+        # that leaves the last good snapshot published to KV untouched and
+        # lets the workflow's KV-publish/guardrail steps no-op.
+        if not is_transient_login_error(exc):
+            raise
+        log.warning("login blocked by ForeUp edge (%s); skipping this tick", exc)
+        return 0
     # CachingClient dedupes identical get_times calls across check sets in
     # this tick — two configs scanning the same teesheet/date now share
     # one HTTP response. Fresh wrapper per tick so caches don't persist.

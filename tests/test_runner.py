@@ -171,6 +171,54 @@ def test_no_configs_returns_zero(tmp_path, monkeypatch, caplog):
     assert "no check sets returned" in caplog.text
 
 
+def _login_failer(exc):
+    class FailingClient(StubClient):
+        def login(self, *_args, **_kwargs):
+            raise exc
+    return FailingClient
+
+
+def test_transient_login_block_skips_tick_without_snapshot(tmp_path, monkeypatch, caplog):
+    """A WAF 403 surviving retries is a missed beat: exit 0, write no snapshot."""
+    from sdgolf_monitor.client import ForeUpAuthError
+
+    caplog.set_level(logging.WARNING, logger="sdgolf")
+    monkeypatch.setenv("SDGOLF_USERNAME", "x")
+    monkeypatch.setenv("SDGOLF_PASSWORD", "x")
+    waf = ForeUpAuthError("login http 403: forbidden")
+    waf.status_code = 403
+    monkeypatch.setattr(main_mod, "ForeUpClient", _login_failer(waf))
+
+    snap = tmp_path / "snapshot.json"
+    rc = main_mod.main(
+        tmp_path / "state",
+        configs=[_config("a-good", ["A"])],
+        dry_run=True,
+        snapshot_path=snap,
+    )
+    assert rc == 0
+    assert "login blocked by ForeUp edge" in caplog.text
+    # No snapshot → the workflow leaves the last good KV snapshot untouched.
+    assert not snap.exists()
+
+
+def test_genuine_login_rejection_is_raised(tmp_path, monkeypatch):
+    """Bad password (no retryable status) must fail loudly, not skip silently."""
+    from sdgolf_monitor.client import ForeUpAuthError
+
+    monkeypatch.setenv("SDGOLF_USERNAME", "x")
+    monkeypatch.setenv("SDGOLF_PASSWORD", "x")
+    rejected = ForeUpAuthError("login rejected: {'success': False}")
+    monkeypatch.setattr(main_mod, "ForeUpClient", _login_failer(rejected))
+
+    with pytest.raises(ForeUpAuthError):
+        main_mod.main(
+            tmp_path / "state",
+            configs=[_config("a-good", ["A"])],
+            dry_run=True,
+        )
+
+
 def test_autobook_fires_for_owner_and_caps_at_one_per_day(tmp_path, monkeypatch):
     """Owner's autobook fires once; second config that day is skipped by the cap."""
     from datetime import date as _date_mod, datetime, timezone

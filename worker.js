@@ -12,6 +12,7 @@
 //   - POST /api/configs/:id/subscribe          add session email to subscribers
 //   - POST /api/configs/:id/unsubscribe        remove session email
 //   - GET  /api/internal/configs               runner-only (Bearer RUNNER_SECRET)
+//   - *    /api/internal/foreup/*              runner-only ForeUp egress proxy
 //   - everything else                          static assets in ui/
 //   - scheduled cron                           dispatch the GH monitor workflow
 
@@ -48,6 +49,10 @@ export default {
     if (pathname === "/api/internal/welcomes" && method === "GET") return handleInternalWelcomes(request, env);
     const welcomeMatch = pathname.match(/^\/api\/internal\/welcomes\/([a-z0-9-]{1,128})$/);
     if (welcomeMatch && method === "DELETE") return handleInternalWelcomeDelete(request, env, welcomeMatch[1]);
+
+    if (pathname.startsWith("/api/internal/foreup/")) {
+      return handleInternalForeup(request, env, pathname.slice("/api/internal/foreup".length));
+    }
 
     if (pathname === "/api/admin/emails" && method === "GET") return handleAdminListEmails(request, env);
     if (pathname === "/api/admin/emails" && method === "PUT") return handleAdminPutEmails(request, env);
@@ -872,6 +877,55 @@ async function handleInternalConfigs(request, env) {
     if (Object.keys(map).length) cfg.recipient_away = map;
   }
   return json(configs);
+}
+
+// ForeUp's WAF intermittently 403s requests from GitHub's shared Actions
+// runner IPs (IP-reputation filtering on cloud egress ranges). Cloudflare's
+// egress has far better reputation, so the runner tunnels every ForeUp call
+// through here instead of hitting foreupsoftware.com directly. This is a thin
+// transparent proxy: it forwards method/path/query/body + the handful of
+// headers ForeUp cares about, and relays the response status, content-type,
+// and Set-Cookie back. PHPSESSID is host-only, so the runner's requests.Session
+// scopes it to this Worker's host and replays it across the login handshake
+// with no cookie rewriting needed. Scoped to one upstream host and gated by
+// RUNNER_SECRET, so it is not an open proxy.
+const FOREUP_ORIGIN = "https://foreupsoftware.com";
+const FOREUP_FORWARD_HEADERS = [
+  "user-agent", "accept", "content-type",
+  "x-requested-with", "api-key", "x-authorization", "cookie",
+];
+
+async function handleInternalForeup(request, env, upstreamPath) {
+  if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  const url = new URL(request.url);
+  const target = `${FOREUP_ORIGIN}${upstreamPath}${url.search}`;
+
+  // Whitelist forwarded headers: deliberately drop Authorization (that's our
+  // runner secret, not ForeUp's) and anything CF-injected (cf-*, x-forwarded-*).
+  const fwd = new Headers();
+  for (const h of FOREUP_FORWARD_HEADERS) {
+    const v = request.headers.get(h);
+    if (v) fwd.set(h, v);
+  }
+  const method = request.method;
+  const body = (method === "GET" || method === "HEAD") ? undefined : await request.arrayBuffer();
+
+  let upstream;
+  try {
+    upstream = await fetch(target, { method, headers: fwd, body, redirect: "manual" });
+  } catch (e) {
+    return json({ error: "foreup upstream fetch failed", detail: String(e) }, 502);
+  }
+
+  // Build a fresh response: copy content-type + Set-Cookie only. We read the
+  // (already-decoded) body as bytes and omit Content-Encoding/Length so the
+  // client never sees an encoding mismatch.
+  const out = new Headers();
+  const ct = upstream.headers.get("content-type");
+  if (ct) out.set("content-type", ct);
+  for (const c of upstream.headers.getSetCookie()) out.append("set-cookie", c);
+  const buf = await upstream.arrayBuffer();
+  return new Response(buf, { status: upstream.status, headers: out });
 }
 
 async function handleInternalPending(request, env) {

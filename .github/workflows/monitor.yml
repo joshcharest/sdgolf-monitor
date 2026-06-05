@@ -44,6 +44,10 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           WORKER_URL: https://sdgolf-monitor.joshcharest1.workers.dev
           RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+          # Tunnel all ForeUp HTTP through the Worker's egress instead of the
+          # runner's IP — ForeUp's WAF intermittently 403s GitHub runner IPs.
+          # The runner authenticates to this endpoint with RUNNER_SECRET.
+          FOREUP_PROXY_URL: https://sdgolf-monitor.joshcharest1.workers.dev/api/internal/foreup
           # App-side email whose configs are allowed to autobook on the
           # shared ForeUp account. Restricts autobook to sets you own so a
           # subscriber can't trigger a charge on your card.
