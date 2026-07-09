@@ -131,5 +131,14 @@ pytest
   server-rendered search results table, so a portal redesign would break
   it. No prices are published in search results (Navy green fees depend
   on patron category), so fee filters don't apply to those courses.
+- CPS.golf / Club Prophet courses (Encinitas Ranch, The Crossings, Rancho
+  Bernardo Inn, Twin Oaks — the JC Golf tenants) are **not supported**.
+  Their tee-time API sits behind a Cloudflare *browser-integrity*
+  challenge that returns `403 cf-mitigated: challenge` to any non-browser
+  HTTP client — confirmed from both datacenter (GitHub runner) and
+  residential IPs, so it's not an IP-reputation block. The vendor's own
+  app passes only because it's a real browser (a Gallus Golf WebView).
+  Reaching it headlessly would require defeating the bot challenge, which
+  is out of scope.
 - Monitoring only — this does not book tee times. Booking requires
   card-on-file and a captcha flow that isn't worth automating.
