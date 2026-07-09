@@ -13,10 +13,11 @@ Discovery notes (probed 2026-07):
 - ``secondarycode`` picks the course (28 = Admiral Baker North,
   29 = Admiral Baker South, 27 = Sea 'N Air). One query returns one
   course-local date; times are rendered course-local ("4:09 pm").
-- ``numberofholes`` must be 9 or 18 — there is no "all". A 9-hole query
-  at Admiral Baker returns nothing even on wide-open days (9-hole rounds
-  aren't sold online), but we still issue it for ``holes="all"`` so a
-  course that does expose them isn't silently missed.
+- ``numberofholes`` must be 9 or 18 — there is no "all", so
+  ``holes="all"`` issues both queries. The same first-tee slot is sold
+  as a 9- or 18-hole *reservation type*: Admiral Baker returns nothing
+  for 9 even on wide-open days (not sold online there), while Sea 'N
+  Air returns the full sheet under both.
 - The whole day comes back in one response (no pagination; 72 rows on an
   open day). "No results" re-renders the search form *without* the output
   table, indistinguishable from an invalid query — parse defensively.

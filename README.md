@@ -1,10 +1,10 @@
 # sdgolf-monitor
 
 Polls San Diego golf tee sheets — City courses (Balboa Park 9/18, Torrey
-Pines N/S via ForeUp), Coronado (via TeeItUp), and Admiral Baker North
-(Navy MWR, via WebTrac) — on a schedule and emails you when a new slot
-matching your filter shows up. Designed to run as a GitHub Actions cron
-job — no servers, no AWS, no browser.
+Pines N/S via ForeUp), Coronado (via TeeItUp), and the Navy MWR courses
+(Admiral Baker N/S, Sea 'N Air via WebTrac) — on a schedule and emails
+you when a new slot matching your filter shows up. Designed to run as a
+GitHub Actions cron job — no servers, no AWS, no browser.
 
 A web UI for managing check sets is also published to GitHub Pages.
 
@@ -127,9 +127,9 @@ pytest
   the JWT + `Api-Key: no_limits` shape the SPA uses today.
 - The booking-class IDs and pricing are San Diego-specific. Other ForeUp
   courses would need their own discovery run.
-- Admiral Baker (Navy WebTrac) has no JSON API — the monitor scrapes the
+- The Navy courses (WebTrac) have no JSON API — the monitor scrapes the
   server-rendered search results table, so a portal redesign would break
   it. No prices are published in search results (Navy green fees depend
-  on patron category), so fee filters don't apply to that course.
+  on patron category), so fee filters don't apply to those courses.
 - Monitoring only — this does not book tee times. Booking requires
   card-on-file and a captcha flow that isn't worth automating.

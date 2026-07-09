@@ -95,6 +95,8 @@ _TEEITUP_COURSES = {
 # Mirror of the webtrac entries in ui/schema.js TEESHEETS — keep in sync.
 _WEBTRAC_COURSES = {
     "Admiral Baker North": 28,
+    "Admiral Baker South": 29,
+    "Sea 'N Air": 27,
 }
 
 

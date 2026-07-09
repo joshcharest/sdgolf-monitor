@@ -28,4 +28,8 @@ export const TEESHEETS = [
     facility_id: 10985, alias: "coronado-gc-3-14-be" },
   { id: 28,    label: "Admiral Baker North", provider: "webtrac",
     secondarycode: 28 },
+  { id: 29,    label: "Admiral Baker South", provider: "webtrac",
+    secondarycode: 29 },
+  { id: 27,    label: "Sea 'N Air", provider: "webtrac",
+    secondarycode: 27 },
 ];
