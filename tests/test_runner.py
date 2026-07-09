@@ -260,6 +260,39 @@ def test_autobook_fires_for_owner_and_caps_at_one_per_day(tmp_path, monkeypatch)
     assert budget.available() is False
 
 
+def test_autobook_only_considers_foreup_targets():
+    """Non-ForeUp slots (TeeItUp/WebTrac) are alert-only — never autobooked.
+
+    The runner's single login is a ForeUp account, so an earlier WebTrac
+    slot must lose to a later ForeUp slot, and a cfg with no ForeUp
+    targets must produce no decision at all.
+    """
+    from datetime import date as _date_mod, timedelta
+    from sdgolf_monitor.client import TeeTime
+
+    def slot(target, time):
+        d = (_date_mod.today() + timedelta(days=3)).isoformat()
+        return TeeTime(target=target, date=d, time=time, available_spots=2,
+                       holes=18, green_fee=None, booking_fee=None)
+
+    cfg = {
+        "id": "mixed", "name": "mixed", "owner": "owner@example.com",
+        "autobook": {"enabled": True},
+        "targets": [
+            {"name": "Balboa Park 18", "teesheet_id": 1470},
+            {"name": "Admiral Baker North", "provider": "webtrac", "secondarycode": 28},
+        ],
+    }
+    budget = autobook.Budget({"date": "", "slots": []}, "owner@example.com")
+    decision = budget.consider(cfg, [slot("Admiral Baker North", "07:00"),
+                                     slot("Balboa Park 18", "09:00")])
+    assert decision is not None
+    assert decision.slot.target == "Balboa Park 18"
+
+    cfg_webtrac_only = {**cfg, "targets": [cfg["targets"][1]]}
+    assert budget.consider(cfg_webtrac_only, [slot("Admiral Baker North", "07:00")]) is None
+
+
 def test_autobook_skips_slot_within_lead_time(tmp_path, monkeypatch):
     """A near-term slot is filtered out; the next-earliest eligible one wins."""
     from datetime import date as _date_mod, datetime, timezone

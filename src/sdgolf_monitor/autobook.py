@@ -157,6 +157,15 @@ def should_autobook(cfg: dict[str, Any], runner_account_email: str) -> bool:
     return True
 
 
+def _foreup_target_names(cfg: dict[str, Any]) -> set[str]:
+    """Names of this cfg's targets bookable through the runner's ForeUp login."""
+    return {
+        t.get("name")
+        for t in (cfg.get("targets") or [])
+        if isinstance(t, dict) and (t.get("provider") or "foreup").lower() == "foreup"
+    }
+
+
 def prune_future(state: dict[str, Any]) -> dict[str, Any]:
     """Drop entries for dates that have already passed so the file stays small."""
     today = date.today().isoformat()
@@ -194,14 +203,21 @@ class Budget:
             return None
         if not should_autobook(cfg, self.runner_account_email):
             return None
-        # Drop slots that tee off too soon (per-course lead time) or that
-        # fall in the advanced-booking-fee window (≥8 days out). Alerts
-        # still go out for both — only the automated booking is suppressed.
-        eligible = [t for t in new_times if far_enough_out(t) and not has_advanced_fee(t)]
+        # Drop slots that aren't bookable with the runner's ForeUp login
+        # (TeeItUp/WebTrac courses are alert-only), that tee off too soon
+        # (per-course lead time), or that fall in the advanced-booking-fee
+        # window (≥8 days out). Alerts still go out for all of these —
+        # only the automated booking is suppressed.
+        bookable = _foreup_target_names(cfg)
+        eligible = [
+            t for t in new_times
+            if t.target in bookable and far_enough_out(t) and not has_advanced_fee(t)
+        ]
         skipped = len(new_times) - len(eligible)
         if skipped:
             log.info(
-                "[%s] autobook: skipping %d slot(s) (within course lead time or in advanced-fee window)",
+                "[%s] autobook: skipping %d slot(s) (non-ForeUp course, within "
+                "course lead time, or in advanced-fee window)",
                 cfg.get("name") or cfg.get("id"), skipped,
             )
         slot = pick_slot(eligible)

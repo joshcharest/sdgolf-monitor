@@ -4,7 +4,7 @@
 // 0-7 day window, 51735 for 8-90), so it isn't part of this schema.
 
 // Each entry needs an ``id`` unique across all providers — it's the value
-// stored on the form checkbox. Two providers today:
+// stored on the form checkbox. Three providers today:
 //
 // foreup (SD City Golf): ``id`` is the ForeUp ``teesheet_id`` (= the
 //   booking API's ``schedule_id``). ``facility`` is the SPA's
@@ -15,6 +15,10 @@
 //   ``?course=`` URL param and the API's ``facilityIds`` param).
 //   ``alias`` selects which rate-window view the API responds with — it
 //   matches the subdomain of the booking SPA.
+//
+// webtrac (Navy MWR — Admiral Baker): ``id`` is the WebTrac
+//   ``secondarycode`` course code on the myffr.navyaims.com portal
+//   (28 = Admiral Baker North, 29 = South, 27 = Sea 'N Air).
 export const TEESHEETS = [
   { id: 1470,  label: "Balboa Park 18",     provider: "foreup",  facility: 19348 },
   { id: 1490,  label: "Balboa Park 9",      provider: "foreup",  facility: 19348 },
@@ -22,4 +26,6 @@ export const TEESHEETS = [
   { id: 1487,  label: "Torrey Pines South", provider: "foreup",  facility: 19347 },
   { id: 10985, label: "Coronado (3-14d)", provider: "teeitup",
     facility_id: 10985, alias: "coronado-gc-3-14-be" },
+  { id: 28,    label: "Admiral Baker North", provider: "webtrac",
+    secondarycode: 28 },
 ];

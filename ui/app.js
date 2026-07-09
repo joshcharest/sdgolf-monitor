@@ -671,10 +671,11 @@ function buildTimeLi(m, onBook) {
   link.append(primary, meta);
   row.appendChild(link);
 
-  // TeeItUp slots aren't bookable through the worker (no auth/captcha
-  // automation); fall back to the link-only UX for those courses.
-  const isTeeItUp = TEESHEETS.find(t => t.label === m.target)?.provider === "teeitup";
-  if (onBook && !isTeeItUp) {
+  // Only ForeUp slots are bookable through the worker (it holds a single
+  // ForeUp login; no auth/captcha automation for TeeItUp or WebTrac).
+  // Everything else gets the link-only UX.
+  const provider = TEESHEETS.find(t => t.label === m.target)?.provider ?? "foreup";
+  if (onBook && provider === "foreup") {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "match-book-btn";
@@ -714,6 +715,26 @@ function bookingUrl(m) {
     });
     if (/^\d{4}-\d{2}-\d{2}$/.test(m.date)) params.set("date", m.date);
     return `https://${ts.alias}.book.teeitup.com/?${params.toString()}`;
+  }
+  if (ts?.provider === "webtrac") {
+    // WebTrac doesn't enforce its CSRF token on the search GET, so this
+    // link runs the search and lands on live results for the slot's date.
+    // Mirror of sdgolf_monitor/webtrac.py booking_url — keep in sync.
+    const params = new URLSearchParams({
+      Action: "Start",
+      interfaceparameter: "webtrac_southwest",
+      module: "GR",
+      secondarycode: String(ts.secondarycode),
+      begintime: "05:00 am",
+      numberofplayers: "1",
+      numberofholes: "18",
+      display: "Detail",
+    });
+    if (/^\d{4}-\d{2}-\d{2}$/.test(m.date)) {
+      const [y, mo, d] = m.date.split("-");
+      params.set("begindate", `${mo}/${d}/${y}`);
+    }
+    return `https://myffr.navyaims.com/navywest/webtrac/web/search.html?${params.toString()}`;
   }
   const bookingClass = m.booking_fee ? 51735 : 929;
   const facility = ts?.facility ?? 19348;
@@ -899,10 +920,12 @@ function renderEdit(existingId) {
 
 function setupTargets(targets) {
   const knownIds = new Set(TEESHEETS.map(ts => ts.id));
-  // Targets carry either teesheet_id (ForeUp) or facility_id (TeeItUp);
-  // TEESHEETS.id is reused for both, so look at both.
+  // Targets carry teesheet_id (ForeUp), facility_id (TeeItUp), or
+  // secondarycode (WebTrac); TEESHEETS.id is reused for all three.
   const selectedIds = new Set(
-    targets.map(t => t.teesheet_id ?? t.facility_id).filter(id => knownIds.has(id))
+    targets
+      .map(t => t.teesheet_id ?? t.facility_id ?? t.secondarycode)
+      .filter(id => knownIds.has(id))
   );
 
   const grid = document.getElementById("courses-grid");
@@ -1339,7 +1362,7 @@ function buildTourSteps() {
     {
       view: "list",
       title: "Welcome to sdgolf-monitor",
-      body: "Tee-time alerts for the SD city courses (Balboa, Torrey Pines) and Coronado. Quick tour — under a minute.",
+      body: "Tee-time alerts for the SD city courses (Balboa, Torrey Pines), Coronado, and Admiral Baker. Quick tour — under a minute.",
     },
     {
       view: "list",
@@ -1668,6 +1691,12 @@ function readForm(form) {
         provider: "teeitup",
         facility_id: meta.facility_id,
         alias: meta.alias,
+      });
+    } else if (meta.provider === "webtrac") {
+      targets.push({
+        name: meta.label,
+        provider: "webtrac",
+        secondarycode: meta.secondarycode,
       });
     } else {
       targets.push({ name: meta.label, teesheet_id: id });

@@ -24,6 +24,7 @@ from . import autobook, notify
 from .client import ForeUpAuthError, ForeUpClient, TeeTime, is_transient_login_error
 from .runner import CachingClient, SmtpCreds, recipients_for, run_check_set
 from .teeitup import TeeItUpClient
+from .webtrac import WebTracClient
 
 log = logging.getLogger("sdgolf")
 
@@ -85,7 +86,12 @@ def main(
     # one HTTP response. Fresh wrapper per tick so caches don't persist.
     foreup_cached = CachingClient(client)
     teeitup_cached = CachingClient(TeeItUpClient())
-    clients = {"foreup": foreup_cached, "teeitup": teeitup_cached}
+    webtrac_cached = CachingClient(WebTracClient())
+    clients = {
+        "foreup": foreup_cached,
+        "teeitup": teeitup_cached,
+        "webtrac": webtrac_cached,
+    }
     log.info(
         "logged in as %s %s; %d check set(s) to scan",
         client.user["first_name"], client.user["last_name"], len(configs),
@@ -233,8 +239,8 @@ def main(
     if autobook_budget is not None:
         autobook.save_state(autobook_state_path, autobook_budget.snapshot())
 
-    total_hits = foreup_cached.hits + teeitup_cached.hits
-    total_misses = foreup_cached.misses + teeitup_cached.misses
+    total_hits = sum(c.hits for c in clients.values())
+    total_misses = sum(c.misses for c in clients.values())
     if total_hits + total_misses:
         log.info(
             "request cache: %d hit(s) / %d miss(es) — saved %d HTTP call(s)",

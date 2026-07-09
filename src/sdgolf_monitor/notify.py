@@ -13,6 +13,7 @@ from email.message import EmailMessage
 from html import escape as html_escape
 
 from .client import TeeTime
+from .webtrac import booking_url as _webtrac_booking_url
 
 # 90 days is long enough that anyone who saved an old email can still click
 # through, but short enough that a leaked URL eventually stops working.
@@ -89,6 +90,13 @@ _TEEITUP_COURSES = {
     "Coronado (3-14d)": (10985, "coronado-gc-3-14-be"),
 }
 
+# WebTrac (Navy MWR) courses keyed by target name -> secondarycode. The
+# search URL doubles as the booking deep-link — see webtrac.booking_url.
+# Mirror of the webtrac entries in ui/schema.js TEESHEETS — keep in sync.
+_WEBTRAC_COURSES = {
+    "Admiral Baker North": 28,
+}
+
 
 def _is_iso_date(s: str) -> bool:
     try:
@@ -114,6 +122,9 @@ def _booking_url(target: str, date_iso: str) -> str | None:
         if _is_iso_date(date_iso):
             params += f"&date={date_iso}"
         return f"https://{alias}.book.teeitup.com/?{params}"
+    webtrac_code = _WEBTRAC_COURSES.get(target)
+    if webtrac_code is not None:
+        return _webtrac_booking_url(webtrac_code, date_iso)
     ids = _COURSE_IDS.get(target)
     if not ids:
         return None
@@ -179,6 +190,10 @@ def _fmt_money(amount: float) -> str:
 
 
 def _fee_text(target: str, non_resident: float | None, booking_fee: float | None) -> str:
+    # WebTrac never publishes prices in search results (Navy green fees
+    # depend on patron category), so show nothing rather than "?".
+    if target in _WEBTRAC_COURSES:
+        return ""
     rate = _resident_rate(target, non_resident)
     base = _fmt_money(rate) if rate is not None else "?"
     if not _has_advanced_fee(booking_fee):
@@ -684,7 +699,12 @@ def _plaintext(
         )
         url = _booking_url(tt.target, tt.date)
         if url:
-            vendor = "TeeItUp" if tt.target in _TEEITUP_COURSES else "ForeUp"
+            if tt.target in _TEEITUP_COURSES:
+                vendor = "TeeItUp"
+            elif tt.target in _WEBTRAC_COURSES:
+                vendor = "WebTrac"
+            else:
+                vendor = "ForeUp"
             lines.append(f"    Open in {vendor}: {url}")
         book_url = (book_urls or {}).get(tt.key)
         if book_url:

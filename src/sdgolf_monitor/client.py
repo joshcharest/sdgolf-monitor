@@ -56,14 +56,17 @@ class Target:
 
     Defaults match ForeUp (the SD City Golf courses). For TeeItUp-backed
     courses like Coronado, set ``provider="teeitup"`` and populate
-    ``facility_id`` + ``alias`` instead of teesheet_id/booking_class.
+    ``facility_id`` + ``alias`` instead of teesheet_id/booking_class. For
+    WebTrac-backed courses like Admiral Baker, set ``provider="webtrac"``
+    and populate ``secondarycode``.
     """
     name: str                                # human-readable, e.g. "Balboa Park 18"
     teesheet_id: int | None = None           # ForeUp: schedule_id query param
     booking_class: int | None = None         # ForeUp: account-allowed booking class
-    provider: str = "foreup"                 # "foreup" or "teeitup"
+    provider: str = "foreup"                 # "foreup", "teeitup", or "webtrac"
     facility_id: int | None = None           # TeeItUp: golfFacilityId
     alias: str | None = None                 # TeeItUp: x-be-alias / subdomain
+    secondarycode: int | None = None         # WebTrac: course code in the portal
 
 
 @dataclass(frozen=True)
