@@ -1465,3 +1465,21 @@ form .hint code {
   .check-card .edit-btn { padding: 7px 14px; font-size: 11px; }
   input, select, textarea { font-size: 16px; padding: 11px 12px; } /* prevents iOS zoom */
 }
+
+/* ---------- SMS text-alerts modal -------------------------------------- */
+
+.sms-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0 6px;
+}
+.sms-consent input { margin-top: 3px; flex-shrink: 0; }
+.sms-consent span {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  font-weight: 400;
+}
+.sms-consent a { color: var(--link); }
+.sms-state .primary:disabled { opacity: 0.45; cursor: not-allowed; }

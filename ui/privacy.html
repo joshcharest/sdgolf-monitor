@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy policy · SDGolf Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <style>
+    /* Self-contained on purpose: this page is linked from SMS carrier
+       verification filings and must render with zero app dependencies. */
+    :root {
+      --bg: #0d1612; --bg-deep: #060b08; --panel: #131e1a; --border: #2a3530;
+      --text: #e8e3d4; --text-dim: #a39a86; --accent: #c9a96a; --link: #d5b67a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 15px; line-height: 1.6;
+      color: var(--text);
+      background: linear-gradient(180deg, var(--bg) 0%, var(--bg-deep) 100%);
+      background-attachment: fixed;
+      min-height: 100vh;
+    }
+    main { max-width: 680px; margin: 0 auto; padding: 48px 20px 80px; }
+    h1 { font-family: Georgia, serif; font-size: 30px; font-weight: 600; margin: 0 0 4px; }
+    .effective { color: var(--text-dim); font-size: 13px; margin: 0 0 32px; }
+    h2 { font-family: Georgia, serif; font-size: 19px; font-weight: 600; margin: 34px 0 10px; color: var(--accent); }
+    p, li { color: var(--text); }
+    ul { padding-left: 22px; }
+    li { margin: 5px 0; }
+    a { color: var(--link); }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      padding: 16px 20px; margin: 16px 0;
+    }
+    .card p { margin: 6px 0; }
+    strong { color: var(--text); }
+    .muted { color: var(--text-dim); font-size: 13px; }
+    footer { margin-top: 48px; border-top: 1px solid var(--border); padding-top: 18px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>SDGolf Monitor — Privacy policy</h1>
+    <p class="effective">Effective July 10, 2026</p>
+
+    <p>
+      SDGolf Monitor is a small, invite-only tee-time alert service for San Diego golf
+      courses, run personally by its maintainer for a group of friends. It watches course
+      booking sites and notifies you — by email and, if you opt in, by text message — when
+      a tee time matching your saved search appears. It sells nothing and shows no ads.
+    </p>
+
+    <h2>What we collect</h2>
+    <ul>
+      <li><strong>Account email and password</strong> (password stored as a salted, peppered hash — never in plain text).</li>
+      <li><strong>Your alert subscriptions</strong>: courses, dates, times, and player filters you set up, plus any "away" dates you mark.</li>
+      <li><strong>If you opt in to text alerts</strong>: your mobile phone number, your chosen texting-hours window, and a consent record — the timestamp, IP address, browser user-agent, and the exact version of the consent language you agreed to — plus a log of verification and opt-out events.</li>
+      <li><strong>Bug reports</strong> you choose to submit, including the description you type and recent client-side error logs.</li>
+    </ul>
+
+    <h2>How it's used</h2>
+    <p>
+      For exactly one purpose: sending you the tee-time alerts you asked for and operating
+      the service (signing you in, filing your bug reports, keeping legally required
+      consent records). All messages — email and SMS — are informational alerts you
+      requested. We send no marketing or promotional messages of any kind.
+    </p>
+
+    <h2>Text messages (SMS)</h2>
+    <div class="card">
+      <p><strong>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes.</strong> Phone numbers and SMS opt-in data are never sold, rented, or shared with anyone for marketing.</p>
+    </div>
+    <ul>
+      <li>Text alerts are strictly <strong>opt-in</strong>: you enter your own number, agree to the disclosure, and confirm a one-time verification code before any alert is sent.</li>
+      <li>Message frequency varies with tee-time availability. Message and data rates may apply. Carriers are not liable for delayed or undelivered messages.</li>
+      <li>Reply <strong>STOP</strong> to any message to cancel immediately. Reply <strong>HELP</strong> for help, or contact the email below.</li>
+      <li>Alert texts are only sent during your chosen texting-hours window (8am–9pm Pacific by default, or 5am–9pm if you choose the early-bird option). Email alerts are unaffected.</li>
+    </ul>
+
+    <h2>Who processes your data</h2>
+    <ul>
+      <li><strong>Cloudflare</strong> — hosts this site and stores account and subscription data.</li>
+      <li><strong>Twilio</strong> — delivers text messages (they receive your phone number and the message content).</li>
+      <li><strong>GitHub</strong> — runs the monitoring job.</li>
+      <li><strong>Google (Gmail)</strong> — delivers alert emails.</li>
+    </ul>
+    <p class="muted">No analytics, ad networks, or data brokers. Data is never shared beyond the processors above, except if required by law.</p>
+
+    <h2>Retention</h2>
+    <ul>
+      <li><strong>SMS consent and opt-out records are retained for at least 5 years</strong>, including after you opt out or your account is deleted — this is our legally required proof of consent under the TCPA.</li>
+      <li>The lookup entry that makes your number routable for alerts is deleted the moment you opt out (by STOP, by the UI toggle, or by account removal) — after that, nothing can text you even by accident.</li>
+      <li>Account and subscription data is deleted when your account is removed.</li>
+    </ul>
+
+    <h2>Your choices</h2>
+    <ul>
+      <li>Turn text alerts off any time in the app ("Texts") or by replying STOP.</li>
+      <li>Unsubscribe from any alert email with its one-click unsubscribe link.</li>
+      <li>Ask for your account or data to be removed by emailing the address below.</li>
+    </ul>
+
+    <footer>
+      <p>Questions, help, or data requests: <a href="mailto:sdgolfmonitor@gmail.com">sdgolfmonitor@gmail.com</a></p>
+      <p class="muted"><a href="/">← Back to SDGolf Monitor</a></p>
+    </footer>
+  </main>
+</body>
+</html>

@@ -9,6 +9,7 @@ import { TEESHEETS } from "./schema.js";
 const ROOT = document.getElementById("root");
 const NEW_BTN = document.getElementById("new-btn");
 const AWAY_BTN = document.getElementById("away-btn");
+const SMS_BTN = document.getElementById("sms-btn");
 const HELP_BTN = document.getElementById("help-btn");
 const ADMIN_BTN = document.getElementById("admin-btn");
 const SIGNOUT_BTN = document.getElementById("signout-btn");
@@ -101,6 +102,10 @@ const apiGetUserOrder   = ()             => api("GET",    "/api/me/order");
 const apiPutUserOrder   = (order)        => api("PUT",    "/api/me/order", { order });
 const apiGetAway        = ()             => api("GET",    "/api/me/away");
 const apiPutAway        = (dates)        => api("PUT",    "/api/me/away", { dates });
+const apiGetSms         = ()             => api("GET",    "/api/me/sms");
+const apiPutSms         = (payload)      => api("PUT",    "/api/me/sms", payload);
+const apiVerifySms      = (code)         => api("POST",   "/api/me/sms/verify", { code });
+const apiDeleteSms      = ()             => api("DELETE", "/api/me/sms");
 
 // Fire-and-forget: tell the Worker to dispatch the monitor workflow right
 // now so the snapshot reflects this config mutation within ~30s instead of
@@ -116,6 +121,7 @@ function triggerDispatch() {
 function setNav({ showNew = false } = {}) {
   NEW_BTN.hidden = !showNew;
   AWAY_BTN.hidden = !(USER && showNew);
+  SMS_BTN.hidden = !(USER && showNew);
   HELP_BTN.hidden = !(USER && showNew);
   ADMIN_BTN.hidden = !(USER && USER.is_admin && showNew);
   SIGNOUT_BTN.hidden = !USER;
@@ -1262,7 +1268,7 @@ async function openAwayCalendar() {
     const intro = document.createElement("p");
     intro.className = "hint";
     intro.style.marginTop = "0";
-    intro.textContent = "Click a date to mark yourself away — no email alerts for any of your subscriptions on that day.";
+    intro.textContent = "Click a date to mark yourself away — no alerts (email or text) for any of your subscriptions on that day.";
     modal.appendChild(intro);
 
     const header = document.createElement("header");
@@ -1351,6 +1357,145 @@ async function openAwayCalendar() {
   }
 
   render();
+  document.body.appendChild(backdrop);
+}
+
+// ----- SMS text-alert enrollment ------------------------------------------
+//
+// Opt-in modal for text alerts. Server truth is the Worker's sms:<email>
+// record; the modal re-fetches on open and renders one of four states:
+// none/disabled -> enroll form, pending -> code entry, active -> manage,
+// stopped -> carrier-block explainer (only texting START can clear it).
+// Phone validation mirrors the Worker's normalisePhone — the one deliberate
+// client/server mirror for this feature. SMS message bodies are composed
+// only on the Python side; no preview here, so copy can't drift.
+
+function normalisePhoneClient(input) {
+  const digits = String(input || "").replace(/\D/g, "");
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (ten.length !== 10 || ten[0] === "0" || ten[0] === "1") return "";
+  return `+1${ten}`;
+}
+
+async function openSmsModal() {
+  let state;
+  try {
+    state = await apiGetSms();
+  } catch (e) {
+    toast(`Could not load text-alert settings: ${e.message}`, "error");
+    return;
+  }
+
+  const node = document.getElementById("sms-modal").content.cloneNode(true);
+  const backdrop = node.querySelector(".modal-backdrop");
+  const err = backdrop.querySelector(".sms-error");
+  const close = () => backdrop.remove();
+  backdrop.addEventListener("click", (e) => { if (e.target === backdrop) close(); });
+  for (const btn of backdrop.querySelectorAll(".sms-cancel")) btn.addEventListener("click", close);
+
+  const showError = (msg) => { err.textContent = msg || ""; err.hidden = !msg; };
+
+  function fill(s) {
+    for (const el of backdrop.querySelectorAll(".sms-phone")) {
+      el.textContent = s.phone_masked || "your number";
+    }
+    const from = backdrop.querySelector(".sms-from");
+    if (from) from.textContent = s.from_number || "our texting number";
+    const hours = backdrop.querySelector(".sms-hours");
+    if (hours) hours.textContent = s.window === "early_bird" ? "Early bird — 5am–9pm PT" : "8am–9pm PT";
+    // "no code was sent" hint: enrollment succeeded but the OTP text didn't
+    // go out (Twilio secrets not set yet, or a transient send failure).
+    const missing = backdrop.querySelector(".sms-otp-missing");
+    if (missing) missing.hidden = !(s.otp_sent === false || s.otp_configured === false);
+  }
+
+  function show(status) {
+    const mapped = (!status || status === "none" || status === "disabled") ? "none" : status;
+    for (const div of backdrop.querySelectorAll(".sms-state")) {
+      div.hidden = div.dataset.state !== mapped;
+    }
+    showError("");
+  }
+
+  // After a PUT is rejected because the number is carrier-blocked (texted
+  // STOP), the server has already flipped the record — re-fetch so the
+  // stopped state renders with the right number.
+  async function refreshFromServer() {
+    try {
+      const s = await apiGetSms();
+      fill(s); show(s.status);
+    } catch { /* keep whatever is on screen */ }
+  }
+
+  const enrollForm = backdrop.querySelector("#sms-enroll-form");
+  const consentBox = enrollForm.querySelector("input[name=consent]");
+  const enrollSubmit = enrollForm.querySelector("button[type=submit]");
+  consentBox.addEventListener("change", () => { enrollSubmit.disabled = !consentBox.checked; });
+  enrollForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const phone = normalisePhoneClient(enrollForm.phone.value);
+    if (!phone) { showError("Enter a valid US mobile number."); return; }
+    enrollSubmit.disabled = true; enrollSubmit.textContent = "Sending…";
+    try {
+      const resp = await apiPutSms({ phone, window: enrollForm.window.value, consent: true });
+      fill(resp); show(resp.status);
+    } catch (e2) {
+      if (e2.status === 409 && /START/i.test(e2.message)) await refreshFromServer();
+      showError(e2.message);
+    } finally {
+      enrollSubmit.disabled = !consentBox.checked;
+      enrollSubmit.textContent = "Send verification code";
+    }
+  });
+
+  const verifyForm = backdrop.querySelector("#sms-verify-form");
+  const verifySubmit = verifyForm.querySelector("button[type=submit]");
+  verifyForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    verifySubmit.disabled = true; verifySubmit.textContent = "Verifying…";
+    try {
+      const resp = await apiVerifySms(verifyForm.code.value.trim());
+      fill(resp); show(resp.status);
+      toast("Text alerts are on");
+    } catch (e2) {
+      showError(e2.message);
+    } finally {
+      verifySubmit.disabled = false; verifySubmit.textContent = "Verify";
+    }
+  });
+
+  const resendBtn = backdrop.querySelector(".sms-resend");
+  resendBtn.addEventListener("click", async () => {
+    resendBtn.disabled = true; resendBtn.textContent = "Sending…";
+    try {
+      const resp = await apiPutSms({ resend: true });
+      fill(resp); show(resp.status);
+      toast(resp.otp_sent ? "Code re-sent" : "Saved — but no text went out");
+    } catch (e2) {
+      if (e2.status === 409 && /START/i.test(e2.message)) await refreshFromServer();
+      showError(e2.message);
+    } finally {
+      resendBtn.disabled = false; resendBtn.textContent = "Resend code";
+    }
+  });
+
+  backdrop.querySelector(".sms-disable").addEventListener("click", async () => {
+    if (!confirm("Turn off text alerts? Your consent record is kept, but no more texts will be sent.")) return;
+    try {
+      await apiDeleteSms();
+      consentBox.checked = false;
+      enrollSubmit.disabled = true;
+      show("none");
+      toast("Text alerts turned off");
+    } catch (e2) {
+      showError(e2.message);
+    }
+  });
+
+  backdrop.querySelector(".sms-reenroll").addEventListener("click", () => show("none"));
+
+  fill(state);
+  show(state.status);
   document.body.appendChild(backdrop);
 }
 
@@ -2009,6 +2154,7 @@ function openBugModal() {
 
 NEW_BTN.addEventListener("click", () => renderEdit(null));
 AWAY_BTN.addEventListener("click", () => openAwayCalendar());
+SMS_BTN.addEventListener("click", () => openSmsModal());
 HELP_BTN.addEventListener("click", () => startTour());
 ADMIN_BTN.addEventListener("click", () => renderAdmin());
 document.getElementById("brand-link").addEventListener("click", () => {

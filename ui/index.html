@@ -28,7 +28,8 @@
     </button>
     <nav>
       <button id="new-btn" type="button" hidden>New subscription</button>
-      <button id="away-btn" type="button" hidden title="Dates I'm away — no alerts">Away</button>
+      <button id="away-btn" type="button" hidden title="Dates I'm away — no alerts (email or text)">Away</button>
+      <button id="sms-btn" type="button" hidden title="Get text alerts on your phone">Texts</button>
       <button id="help-btn" type="button" hidden title="Walk through the app features">?</button>
       <button id="admin-btn" type="button" hidden>Admin</button>
       <span id="user-badge" class="user-badge" hidden></span>
@@ -254,6 +255,74 @@
         <span class="w-cal-count"></span>
       </button>
       <button type="button" class="w-del" title="Remove window">✕</button>
+    </div>
+  </template>
+
+  <template id="sms-modal">
+    <div class="modal-backdrop">
+      <section class="card modal">
+        <h2>Text alerts</h2>
+
+        <div class="sms-state" data-state="none" hidden>
+          <p class="hint">Get a text the moment a new tee time matches one of your subscriptions. Email alerts continue either way.</p>
+          <form id="sms-enroll-form">
+            <label>Mobile number (US)
+              <input type="tel" name="phone" autocomplete="tel" placeholder="(619) 555-0134" required />
+            </label>
+            <label>Texting hours
+              <select name="window">
+                <option value="standard" selected>8am–9pm PT (default)</option>
+                <option value="early_bird">Early bird — 5am–9pm PT</option>
+              </select>
+            </label>
+            <label class="inline sms-consent">
+              <input type="checkbox" name="consent" />
+              <span>Text me new tee-time alerts from <strong>SDGolf Monitor</strong>. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to cancel, HELP for help. See the <a href="/privacy" target="_blank" rel="noopener">privacy policy</a>.</span>
+            </label>
+            <p class="hint">Texts arrive only during your texting hours — email always arrives regardless.</p>
+            <footer class="edit-footer">
+              <button type="submit" class="primary" disabled>Send verification code</button>
+              <button type="button" class="sms-cancel">Cancel</button>
+            </footer>
+          </form>
+        </div>
+
+        <div class="sms-state" data-state="pending" hidden>
+          <p class="hint">We texted a 6-digit code to <strong class="sms-phone"></strong>. Enter it to switch on text alerts.</p>
+          <p class="hint sms-otp-missing" hidden>Texting isn't live on this server yet, so no code was sent — your number and consent are saved, and you can verify here once texting goes live.</p>
+          <form id="sms-verify-form">
+            <label>Verification code
+              <input type="text" name="code" inputmode="numeric" pattern="\d{6}" maxlength="6" placeholder="123456" required />
+            </label>
+            <footer class="edit-footer">
+              <button type="submit" class="primary">Verify</button>
+              <button type="button" class="sms-resend">Resend code</button>
+              <button type="button" class="sms-cancel">Close</button>
+            </footer>
+          </form>
+        </div>
+
+        <div class="sms-state" data-state="active" hidden>
+          <p>Text alerts are <strong>on</strong> for <strong class="sms-phone"></strong>.</p>
+          <p class="hint">Texting hours: <span class="sms-hours"></span>. To change hours, turn off texts and enroll again.</p>
+          <p class="hint">Reply STOP to any text to stop instantly, HELP for help. Email alerts continue either way.</p>
+          <footer class="edit-footer">
+            <button type="button" class="danger sms-disable">Turn off texts</button>
+            <button type="button" class="sms-cancel">Close</button>
+          </footer>
+        </div>
+
+        <div class="sms-state" data-state="stopped" hidden>
+          <p>You texted <strong>STOP</strong>, so your carrier now blocks our texts to <strong class="sms-phone"></strong>.</p>
+          <p class="hint">To come back: text <strong>START</strong> to <strong class="sms-from"></strong>, then enroll again here. (Carrier-level opt-outs can only be cleared by you.)</p>
+          <footer class="edit-footer">
+            <button type="button" class="primary sms-reenroll">Enroll again</button>
+            <button type="button" class="sms-cancel">Close</button>
+          </footer>
+        </div>
+
+        <p class="error sms-error" hidden></p>
+      </section>
     </div>
   </template>
 
