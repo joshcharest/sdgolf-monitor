@@ -97,7 +97,6 @@ _TEEITUP_COURSES = {
 _WEBTRAC_COURSES = {
     "Admiral Baker North": 28,
     "Admiral Baker South": 29,
-    "Sea 'N Air": 27,
 }
 
 # Golf District resale courses keyed by target name -> course UUID. The

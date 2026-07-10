@@ -2,7 +2,7 @@
 
 Polls San Diego golf tee sheets — City courses (Balboa Park 9/18, Torrey
 Pines N/S via ForeUp), Coronado (via TeeItUp), the Navy MWR courses
-(Admiral Baker N/S, Sea 'N Air via WebTrac), and Encinitas Ranch prepaid
+(Admiral Baker N/S via WebTrac), and Encinitas Ranch prepaid
 resales (via the Golf District marketplace) — on a schedule and emails
 you when a new slot matching your filter shows up. Designed to run as a
 GitHub Actions cron job — no servers, no AWS, no browser.

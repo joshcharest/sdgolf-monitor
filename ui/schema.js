@@ -18,7 +18,7 @@
 //
 // webtrac (Navy MWR — Admiral Baker): ``id`` is the WebTrac
 //   ``secondarycode`` course code on the myffr.navyaims.com portal
-//   (28 = Admiral Baker North, 29 = South, 27 = Sea 'N Air).
+//   (28 = Admiral Baker North, 29 = South).
 //
 // golfdistrict (JC Golf prepaid RESALE marketplace): ``id`` is the Golf
 //   District ``course_id`` UUID from the page URL. This surfaces tee times
@@ -35,8 +35,6 @@ export const TEESHEETS = [
     secondarycode: 28 },
   { id: 29,    label: "Admiral Baker South", provider: "webtrac",
     secondarycode: 29 },
-  { id: 27,    label: "Sea 'N Air", provider: "webtrac",
-    secondarycode: 27 },
   { id: "3f755992-90e0-11ef-9af2-6a003139847e", label: "Encinitas Ranch (resale)",
     provider: "golfdistrict", course_id: "3f755992-90e0-11ef-9af2-6a003139847e" },
 ];

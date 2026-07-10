@@ -1368,7 +1368,7 @@ function buildTourSteps() {
     {
       view: "list",
       title: "Welcome to sdgolf-monitor",
-      body: "Tee-time alerts for the SD city courses (Balboa, Torrey Pines), Coronado, the Navy courses (Admiral Baker, Sea 'N Air), and Encinitas Ranch resale. Quick tour — under a minute.",
+      body: "Tee-time alerts for the SD city courses (Balboa, Torrey Pines), Coronado, the Navy courses (Admiral Baker N/S), and Encinitas Ranch resale. Quick tour — under a minute.",
     },
     {
       view: "list",
