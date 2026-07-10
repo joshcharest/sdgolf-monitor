@@ -77,7 +77,7 @@ targets:
   - { name: "Coronado (3-14d)", provider: teeitup,
       facility_id: 10985, alias: coronado-gc-3-14-be }
   - { name: "Admiral Baker North", provider: webtrac, secondarycode: 28 }
-  - { name: "Encinitas Ranch (resale)", provider: golfdistrict,
+  - { name: "Encinitas Ranch (Golf District)", provider: golfdistrict,
       course_id: 3f755992-90e0-11ef-9af2-6a003139847e }
 dates:
   start: today          # also accepts ISO dates like 2026-06-01

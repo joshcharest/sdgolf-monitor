@@ -43,16 +43,16 @@ def _client(records):
 
 
 def _target():
-    return Target(name="Encinitas Ranch (resale)", provider="golfdistrict",
+    return Target(name="Encinitas Ranch (Golf District)", provider="golfdistrict",
                   course_id=COURSE)
 
 
 # --- record parsing ---------------------------------------------------------
 
 def test_record_maps_fields():
-    tt = _record_to_teetime(_resale(), "Encinitas Ranch (resale)")
+    tt = _record_to_teetime(_resale(), "Encinitas Ranch (Golf District)")
     assert tt is not None
-    assert tt.target == "Encinitas Ranch (resale)"
+    assert tt.target == "Encinitas Ranch (Golf District)"
     assert tt.date == "2026-07-24"
     assert tt.time == "13:03"       # course-local, from the ISO date field
     assert tt.holes == 18

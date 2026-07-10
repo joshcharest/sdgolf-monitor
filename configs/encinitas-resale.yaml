@@ -3,7 +3,7 @@ description: "Encinitas Ranch prepaid tee times being resold by other golfers (G
 targets:
   # provider=golfdistrict surfaces only SECOND_HAND (resale) listings.
   # The name must match the schema.js label / notify.py map key exactly.
-  - name: Encinitas Ranch (resale)
+  - name: Encinitas Ranch (Golf District)
     provider: golfdistrict
     course_id: 3f755992-90e0-11ef-9af2-6a003139847e
 dates:

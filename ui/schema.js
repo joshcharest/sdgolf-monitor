@@ -35,6 +35,6 @@ export const TEESHEETS = [
     secondarycode: 28 },
   { id: 29,    label: "Admiral Baker South", provider: "webtrac",
     secondarycode: 29 },
-  { id: "3f755992-90e0-11ef-9af2-6a003139847e", label: "Encinitas Ranch (resale)",
+  { id: "3f755992-90e0-11ef-9af2-6a003139847e", label: "Encinitas Ranch (Golf District)",
     provider: "golfdistrict", course_id: "3f755992-90e0-11ef-9af2-6a003139847e" },
 ];

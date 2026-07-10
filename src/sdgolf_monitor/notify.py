@@ -103,7 +103,7 @@ _WEBTRAC_COURSES = {
 # marketplace page is the deep-link — see golfdistrict.booking_url. Mirror
 # of the golfdistrict entries in ui/schema.js TEESHEETS — keep in sync.
 _GOLFDISTRICT_COURSES = {
-    "Encinitas Ranch (resale)": "3f755992-90e0-11ef-9af2-6a003139847e",
+    "Encinitas Ranch (Golf District)": "3f755992-90e0-11ef-9af2-6a003139847e",
 }
 
 
