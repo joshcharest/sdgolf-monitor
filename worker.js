@@ -11,7 +11,10 @@
 //   - DEL  /api/configs/:id                    delete (auth + ownership check)
 //   - POST /api/configs/:id/subscribe          add session email to subscribers
 //   - POST /api/configs/:id/unsubscribe        remove session email
+//   - GET/PUT/DEL /api/me/sms                  SMS text-alert opt-in settings
+//   - POST /api/me/sms/verify                  confirm the OTP code -> active
 //   - GET  /api/internal/configs               runner-only (Bearer RUNNER_SECRET)
+//   - POST /api/internal/sms-optout            runner-only STOP/invalid sync
 //   - *    /api/internal/foreup/*              runner-only ForeUp egress proxy
 //   - everything else                          static assets in ui/
 //   - scheduled cron                           dispatch the GH monitor workflow
@@ -35,8 +38,13 @@ export default {
     if (pathname === "/api/me/order"    && method === "PUT")  return handlePutUserOrder(request, env);
     if (pathname === "/api/me/away"     && method === "GET")  return handleGetAway(request, env);
     if (pathname === "/api/me/away"     && method === "PUT")  return handlePutAway(request, env);
+    if (pathname === "/api/me/sms"      && method === "GET")    return handleGetSms(request, env);
+    if (pathname === "/api/me/sms"      && method === "PUT")    return handlePutSms(request, env);
+    if (pathname === "/api/me/sms"      && method === "DELETE") return handleDeleteSms(request, env);
+    if (pathname === "/api/me/sms/verify" && method === "POST") return handleVerifySms(request, env);
 
     if (pathname === "/api/internal/configs" && method === "GET") return handleInternalConfigs(request, env);
+    if (pathname === "/api/internal/sms-optout" && method === "POST") return handleInternalSmsOptout(request, env);
     if (pathname === "/api/internal/pending" && method === "GET") return handleInternalPending(request, env);
     const pendingMatch = pathname.match(/^\/api\/internal\/pending\/([a-z0-9-]{1,128})$/);
     if (pendingMatch && method === "DELETE") return handleInternalPendingDelete(request, env, pendingMatch[1]);
@@ -228,6 +236,7 @@ async function handleAdminPutEmails(request, env) {
   const removed = [...previous].filter(e => !final.includes(e) && !admins.has(e));
   for (const email of removed) {
     await env.SNAPSHOT_KV.delete(`user:${email}`);
+    await disableSmsForEmail(env, email, "admin");
   }
 
   // Queue a welcome email for anyone newly added (and not an admin — admins
@@ -265,6 +274,7 @@ async function handleAdminResetUser(request, env, email) {
   const normalised = normaliseEmail(email);
   if (!normalised) return json({ error: "email required" }, 400);
   await env.SNAPSHOT_KV.delete(`user:${normalised}`);
+  await disableSmsForEmail(env, normalised, "admin");
   return new Response(null, { status: 204 });
 }
 
@@ -389,6 +399,334 @@ async function readUserAway(env, email) {
     const parsed = JSON.parse(v);
     return Array.isArray(parsed) ? parsed.filter(x => typeof x === "string") : [];
   } catch { return []; }
+}
+
+// Per-user SMS text-alert opt-in. The sms:<email> record is the TCPA consent
+// + opt-out audit log, so it is NEVER deleted — opt-outs flip `status` and
+// the record persists (disclosed in privacy.html). Only status === "active"
+// records are ever exposed to the runner (via recipient_sms in
+// handleInternalConfigs), so pending/stopped/disabled users cannot be texted
+// even by a runner bug. The phone:<e164> reverse key enforces one-phone-one-
+// account and IS deleted on every opt-out path, so the routable number never
+// outlives its use.
+//
+// Statuses: pending  = consented, OTP not yet entered
+//           active   = OTP verified — the only status the runner sees
+//           stopped  = texted STOP (carrier-blocked, error 21610) or invalid
+//           disabled = turned off in the UI, or admin removed the account
+
+const SMS_WINDOWS = ["standard", "early_bird"];  // 8am–9pm PT | 5am–9pm PT
+const SMS_DISCLOSURE_VERSION = "v1";             // pins the checkbox text shown at consent
+const SMS_OPTOUT_REASONS = ["stop_21610", "invalid_21211"];
+const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_MAX_SENDS_PER_DAY = 3;
+
+function smsKey(email) {
+  return `sms:${String(email).toLowerCase()}`;
+}
+
+function phoneKey(e164) {
+  return `phone:${e164}`;
+}
+
+async function readUserSms(env, email) {
+  const v = await env.SNAPSHOT_KV.get(smsKey(email));
+  if (!v) return null;
+  try { return JSON.parse(v); } catch { return null; }
+}
+
+// US-only E.164. Accepts "6195550134", "1 (619) 555-0134", "+1619…" etc.
+// Area codes can't start with 0 or 1, which also rejects obvious garbage.
+function normalisePhone(input) {
+  if (typeof input !== "string") return "";
+  const digits = input.replace(/\D/g, "");
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (ten.length !== 10 || ten[0] === "0" || ten[0] === "1") return "";
+  return `+1${ten}`;
+}
+
+function maskPhone(e164) {
+  return e164 ? `(•••) •••-${e164.slice(-4)}` : "";
+}
+
+function smsHistoryPush(rec, event) {
+  rec.history = [...(rec.history || []), { event, ts: new Date().toISOString() }].slice(-50);
+}
+
+async function sha256Hex(s) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function smsSecretsReady(env) {
+  return Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER);
+}
+
+// SDK-free Twilio send (Cloudflare's documented pattern: plain fetch + Basic
+// auth + form body). Missing secrets skip-and-warn like dispatchMonitor —
+// SMS being unconfigured must never break enrollment writes or auth.
+async function sendSmsViaTwilio(env, to, body) {
+  if (!smsSecretsReady(env)) {
+    console.warn("TWILIO_* secrets not configured — skipping SMS send");
+    return { ok: false, skipped: true };
+  }
+  const sid = env.TWILIO_ACCOUNT_SID;
+  let resp;
+  try {
+    resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${btoa(`${sid}:${env.TWILIO_AUTH_TOKEN}`)}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ To: to, From: env.TWILIO_FROM_NUMBER, Body: body }),
+    });
+  } catch (e) {
+    console.error("twilio send fetch failed:", String(e));
+    return { ok: false };
+  }
+  let data = {};
+  try { data = await resp.json(); } catch { /* non-JSON error body */ }
+  if (resp.status >= 400) {
+    console.error("twilio send failed:", resp.status, data.code, data.message);
+    return { ok: false, code: data.code };
+  }
+  return { ok: true };
+}
+
+function otpMessage(code) {
+  // Doubles as the CTIA-required first-message disclosure (brand, frequency,
+  // rates, STOP/HELP). Keep in sync with the TFV filing's sample messages.
+  return `SDGolf Monitor: your code is ${code}. Alerts for new tee times; freq varies. Msg&data rates may apply. Reply STOP to opt out, HELP for help.`;
+}
+
+// Returns {code, verify} for a fresh OTP, or null when today's send budget
+// is exhausted. `prevSends` persists across re-PUTs so cycling phone numbers
+// doesn't reset the budget.
+async function mintOtp(prevSends) {
+  const today = new Date().toISOString().slice(0, 10);
+  const sends = prevSends && prevSends.date === today ? { ...prevSends } : { date: today, count: 0 };
+  if (sends.count >= OTP_MAX_SENDS_PER_DAY) return null;
+  sends.count += 1;
+  const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, "0");
+  const salt = b64encode(crypto.getRandomValues(new Uint8Array(8)));
+  return {
+    code,
+    verify: {
+      code_sha256: await sha256Hex(code + salt),
+      salt,
+      expires: new Date(Date.now() + OTP_TTL_MS).toISOString(),
+      attempts: 0,
+      sends,
+    },
+  };
+}
+
+// The carrier told us this number texted STOP (error 21610): reflect that as
+// status=stopped so the UI explains the START requirement, and free the
+// reverse key. Cannot be cleared from our side — only the user texting START.
+async function markSmsStopped(env, email, rec) {
+  rec.status = "stopped";
+  rec.opt_out_reason = "stop_21610";
+  rec.opted_out_at = new Date().toISOString();
+  rec.updated_at = rec.opted_out_at;
+  delete rec.verify;
+  smsHistoryPush(rec, "stop");
+  if (rec.phone) await env.SNAPSHOT_KV.delete(phoneKey(rec.phone));
+  await env.SNAPSHOT_KV.put(smsKey(email), JSON.stringify(rec));
+}
+
+async function handleGetSms(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const rec = await readUserSms(env, session.email);
+  const configured = smsSecretsReady(env);
+  if (!rec) return json({ status: "none", otp_configured: configured });
+  return json({
+    status: rec.status,
+    phone_masked: maskPhone(rec.phone),
+    window: rec.window || "standard",
+    from_number: configured ? env.TWILIO_FROM_NUMBER : null,
+    otp_configured: configured,
+  });
+}
+
+async function handlePutSms(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const body = await safeJson(request);
+
+  // Resend path: re-text a fresh code for an in-flight enrollment. Consent
+  // and phone were already recorded by the original PUT.
+  if (body?.resend === true) {
+    const rec = await readUserSms(env, session.email);
+    if (!rec || rec.status !== "pending" || !rec.phone) {
+      return json({ error: "no verification in progress" }, 409);
+    }
+    const minted = await mintOtp(rec.verify?.sends);
+    if (!minted) return json({ error: "verification-code limit reached for today — try again tomorrow" }, 429);
+    rec.verify = minted.verify;
+    rec.updated_at = new Date().toISOString();
+    await env.SNAPSHOT_KV.put(smsKey(session.email), JSON.stringify(rec));
+    const sent = await sendSmsViaTwilio(env, rec.phone, otpMessage(minted.code));
+    if (!sent.ok && sent.code === 21610) {
+      await markSmsStopped(env, session.email, rec);
+      return json({ error: "this number texted STOP — text START to our number, then enroll again" }, 409);
+    }
+    return json({ status: "pending", phone_masked: maskPhone(rec.phone), otp_sent: Boolean(sent.ok) });
+  }
+
+  const phone = normalisePhone(body?.phone);
+  const window_ = SMS_WINDOWS.includes(body?.window) ? body.window : "standard";
+  if (!phone) return json({ error: "a valid US mobile number is required" }, 400);
+  if (body?.consent !== true) return json({ error: "consent is required" }, 400);
+
+  // One phone, one account — 409 if another email already claimed it.
+  const claimJson = await env.SNAPSHOT_KV.get(phoneKey(phone));
+  if (claimJson) {
+    try {
+      const claim = JSON.parse(claimJson);
+      if (claim.email && claim.email !== session.email) {
+        return json({ error: "this number is already enrolled on another account" }, 409);
+      }
+    } catch { /* unparseable claim — treat as free */ }
+  }
+
+  const existing = await readUserSms(env, session.email);
+
+  // Already verified on this same number: nothing to re-prove. (Changing the
+  // texting window means re-enrolling — the window is part of the recorded
+  // consent, deliberately.)
+  if (existing && existing.status === "active" && existing.phone === phone) {
+    return json({ status: "active", phone_masked: maskPhone(phone), window: existing.window || "standard" });
+  }
+
+  const minted = await mintOtp(existing?.verify?.sends);
+  if (!minted) return json({ error: "verification-code limit reached for today — try again tomorrow" }, 429);
+
+  const now = new Date().toISOString();
+  const rec = {
+    phone,
+    status: "pending",
+    window: window_,
+    consent: {
+      ts: now,
+      ip: request.headers.get("CF-Connecting-IP") || "",
+      disclosure_version: SMS_DISCLOSURE_VERSION,
+      url: `${new URL(request.url).origin}/`,
+      user_agent: (request.headers.get("User-Agent") || "").slice(0, 400),
+    },
+    verify: minted.verify,
+    history: existing?.history || [],
+    created_at: existing?.created_at || now,
+    updated_at: now,
+  };
+  smsHistoryPush(rec, existing ? "re_opt_in" : "opt_in");
+
+  // Free the old reverse key on a phone change before claiming the new one.
+  if (existing?.phone && existing.phone !== phone) {
+    await env.SNAPSHOT_KV.delete(phoneKey(existing.phone));
+  }
+  await env.SNAPSHOT_KV.put(phoneKey(phone), JSON.stringify({ email: session.email }));
+  await env.SNAPSHOT_KV.put(smsKey(session.email), JSON.stringify(rec));
+
+  const sent = await sendSmsViaTwilio(env, phone, otpMessage(minted.code));
+  if (!sent.ok && sent.code === 21610) {
+    await markSmsStopped(env, session.email, rec);
+    return json({ error: "this number previously texted STOP — text START to our number, then enroll again" }, 409);
+  }
+  if (!sent.ok && sent.code === 21211) {
+    return json({ error: "the carrier rejected this number as invalid — double-check it" }, 400);
+  }
+  return json({ status: "pending", phone_masked: maskPhone(phone), otp_sent: Boolean(sent.ok) }, existing ? 200 : 201);
+}
+
+async function handleVerifySms(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const body = await safeJson(request);
+  const code = typeof body?.code === "string" ? body.code.trim() : "";
+  if (!/^\d{6}$/.test(code)) return json({ error: "enter the 6-digit code" }, 400);
+  const rec = await readUserSms(env, session.email);
+  if (!rec || rec.status !== "pending" || !rec.verify) {
+    return json({ error: "no verification in progress" }, 409);
+  }
+  if (Date.parse(rec.verify.expires) < Date.now()) {
+    return json({ error: "code expired — request a new one" }, 410);
+  }
+  if (rec.verify.attempts >= OTP_MAX_ATTEMPTS) {
+    return json({ error: "too many attempts — request a new code" }, 429);
+  }
+  const hash = await sha256Hex(code + rec.verify.salt);
+  if (!constantTimeEqStr(hash, rec.verify.code_sha256)) {
+    rec.verify.attempts += 1;
+    await env.SNAPSHOT_KV.put(smsKey(session.email), JSON.stringify(rec));
+    const left = OTP_MAX_ATTEMPTS - rec.verify.attempts;
+    return json({ error: left > 0 ? `wrong code — ${left} attempt(s) left` : "too many attempts — request a new code" }, 400);
+  }
+  rec.status = "active";
+  rec.verified_at = new Date().toISOString();
+  rec.updated_at = rec.verified_at;
+  delete rec.verify;
+  smsHistoryPush(rec, "verified");
+  await env.SNAPSHOT_KV.put(smsKey(session.email), JSON.stringify(rec));
+  return json({ status: "active", phone_masked: maskPhone(rec.phone), window: rec.window || "standard" });
+}
+
+async function handleDeleteSms(request, env) {
+  const session = await requireSession(request, env);
+  if (session instanceof Response) return session;
+  const rec = await readUserSms(env, session.email);
+  if (!rec) return new Response(null, { status: 204 });
+  if (rec.phone) await env.SNAPSHOT_KV.delete(phoneKey(rec.phone));
+  rec.status = "disabled";
+  rec.opt_out_reason = "ui";
+  rec.opted_out_at = new Date().toISOString();
+  rec.updated_at = rec.opted_out_at;
+  delete rec.verify;
+  smsHistoryPush(rec, "ui_disable");
+  await env.SNAPSHOT_KV.put(smsKey(session.email), JSON.stringify(rec));
+  return new Response(null, { status: 204 });
+}
+
+// Shared PII cleanup for admin-driven removals (allow-list drop, account
+// reset): flip to disabled — the consent/opt-out log is retained per
+// privacy.html — and delete the routable reverse key.
+async function disableSmsForEmail(env, email, reason) {
+  const rec = await readUserSms(env, email);
+  if (!rec) return;
+  if (rec.phone) await env.SNAPSHOT_KV.delete(phoneKey(rec.phone));
+  if (rec.status === "disabled") return;
+  rec.status = "disabled";
+  rec.opt_out_reason = reason;
+  rec.opted_out_at = new Date().toISOString();
+  rec.updated_at = rec.opted_out_at;
+  delete rec.verify;
+  smsHistoryPush(rec, "admin_disable");
+  await env.SNAPSHOT_KV.put(smsKey(email), JSON.stringify(rec));
+}
+
+// Runner-reported opt-outs: a send failed with 21610 (recipient texted STOP)
+// or 21211 (number invalid). Flip KV so the UI reflects reality within one
+// tick. Missing record is fine — the runner retries harmlessly.
+async function handleInternalSmsOptout(request, env) {
+  if (!checkRunnerSecret(request, env)) return json({ error: "forbidden" }, 403);
+  const body = await safeJson(request);
+  const email = normaliseEmail(body?.email);
+  const reason = SMS_OPTOUT_REASONS.includes(body?.reason) ? body.reason : "";
+  if (!email || !reason) return json({ error: "email and reason (stop_21610|invalid_21211) required" }, 400);
+  const rec = await readUserSms(env, email);
+  if (!rec) return new Response(null, { status: 204 });
+  if (rec.phone) await env.SNAPSHOT_KV.delete(phoneKey(rec.phone));
+  rec.status = "stopped";
+  rec.opt_out_reason = reason;
+  rec.opted_out_at = new Date().toISOString();
+  rec.updated_at = rec.opted_out_at;
+  delete rec.verify;
+  smsHistoryPush(rec, reason === "stop_21610" ? "stop" : "invalid");
+  await env.SNAPSHOT_KV.put(smsKey(email), JSON.stringify(rec));
+  return new Response(null, { status: 204 });
 }
 
 function authSecretsReady(env) {
@@ -862,19 +1200,30 @@ async function handleInternalConfigs(request, env) {
     }
   }
   const awayByEmail = {};
+  // Verified SMS enrollments ride along the same pass: only status="active"
+  // records are exposed, so the runner cannot text an unverified or
+  // opted-out number even by bug.
+  const smsByEmail = {};
   await Promise.all([...recipients].map(async (email) => {
-    const dates = await readUserAway(env, email);
+    const [dates, sms] = await Promise.all([readUserAway(env, email), readUserSms(env, email)]);
     if (dates.length) awayByEmail[email] = dates;
+    if (sms && sms.status === "active" && sms.phone) {
+      smsByEmail[email] = { phone: sms.phone, window: sms.window || "standard" };
+    }
   }));
   for (const cfg of configs) {
     const map = {};
+    const smsMap = {};
     const consider = (addr) => {
       const norm = (addr || "").toLowerCase();
-      if (norm && awayByEmail[norm]) map[norm] = awayByEmail[norm];
+      if (!norm) return;
+      if (awayByEmail[norm]) map[norm] = awayByEmail[norm];
+      if (smsByEmail[norm]) smsMap[norm] = smsByEmail[norm];
     };
     consider(cfg.owner);
     for (const s of cfg.subscribers || []) consider(s);
     if (Object.keys(map).length) cfg.recipient_away = map;
+    if (Object.keys(smsMap).length) cfg.recipient_sms = smsMap;
   }
   return json(configs);
 }
