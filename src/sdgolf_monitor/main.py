@@ -23,6 +23,7 @@ import requests
 from . import autobook, notify
 from .client import ForeUpAuthError, ForeUpClient, TeeTime, is_transient_login_error
 from .runner import CachingClient, SmtpCreds, recipients_for, run_check_set
+from .golfdistrict import GolfDistrictClient
 from .teeitup import TeeItUpClient
 from .webtrac import WebTracClient
 
@@ -87,10 +88,12 @@ def main(
     foreup_cached = CachingClient(client)
     teeitup_cached = CachingClient(TeeItUpClient())
     webtrac_cached = CachingClient(WebTracClient())
+    golfdistrict_cached = CachingClient(GolfDistrictClient())
     clients = {
         "foreup": foreup_cached,
         "teeitup": teeitup_cached,
         "webtrac": webtrac_cached,
+        "golfdistrict": golfdistrict_cached,
     }
     log.info(
         "logged in as %s %s; %d check set(s) to scan",

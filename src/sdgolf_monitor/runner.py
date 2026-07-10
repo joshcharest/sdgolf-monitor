@@ -234,6 +234,12 @@ def _build_target(t: dict[str, Any]) -> Target:
             provider="webtrac",
             secondarycode=int(t["secondarycode"]),
         )
+    if provider == "golfdistrict":
+        return Target(
+            name=t["name"],
+            provider="golfdistrict",
+            course_id=str(t["course_id"]),
+        )
     raw_bc = t.get("booking_class")
     return Target(
         name=t["name"],
@@ -271,9 +277,10 @@ def _booking_horizon(now_utc: datetime | None = None) -> date:
 
 # How far out each provider lets us book. ForeUp resident class 51735 caps
 # at 90 days; Coronado's TeeItUp tenant advertises maxDaysOut=14 in its SPA
-# config; the Navy WebTrac datepicker allows today+30. Dates beyond a
-# target's horizon return empty, so skip the call.
-_PROVIDER_HORIZON_DAYS = {"foreup": 90, "teeitup": 14, "webtrac": 30}
+# config; the Navy WebTrac datepicker allows today+30; the Golf District
+# resale marketplace lists ~60 days out. Dates beyond a target's horizon
+# return empty, so skip the call.
+_PROVIDER_HORIZON_DAYS = {"foreup": 90, "teeitup": 14, "webtrac": 30, "golfdistrict": 60}
 
 
 def _target_horizon_date(provider: str, *, now_utc: datetime | None = None) -> date | None:
@@ -310,6 +317,7 @@ class CachingClient:
             target.facility_id,
             target.alias,
             target.secondarycode,
+            target.course_id,
             date_str,
             holes,
         )

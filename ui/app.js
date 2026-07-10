@@ -736,6 +736,10 @@ function bookingUrl(m) {
     }
     return `https://myffr.navyaims.com/navywest/webtrac/web/search.html?${params.toString()}`;
   }
+  if (ts?.provider === "golfdistrict") {
+    // Resale marketplace page for the course — lands on its live listings.
+    return `https://jcresorts.golfdistrict.com/${ts.course_id}`;
+  }
   const bookingClass = m.booking_fee ? 51735 : 929;
   const facility = ts?.facility ?? 19348;
   const base = `https://foreupsoftware.com/index.php/booking/${facility}/${bookingClass}`;
@@ -919,12 +923,14 @@ function renderEdit(existingId) {
 }
 
 function setupTargets(targets) {
-  const knownIds = new Set(TEESHEETS.map(ts => ts.id));
-  // Targets carry teesheet_id (ForeUp), facility_id (TeeItUp), or
-  // secondarycode (WebTrac); TEESHEETS.id is reused for all three.
+  const knownIds = new Set(TEESHEETS.map(ts => String(ts.id)));
+  // Targets carry teesheet_id (ForeUp), facility_id (TeeItUp), secondarycode
+  // (WebTrac), or course_id (Golf District); TEESHEETS.id is reused for all
+  // four. Compare as strings so Golf District's UUID ids work alongside the
+  // integer ids.
   const selectedIds = new Set(
     targets
-      .map(t => t.teesheet_id ?? t.facility_id ?? t.secondarycode)
+      .map(t => String(t.teesheet_id ?? t.facility_id ?? t.secondarycode ?? t.course_id ?? ""))
       .filter(id => knownIds.has(id))
   );
 
@@ -933,7 +939,7 @@ function setupTargets(targets) {
     const node = document.getElementById("course-option").content.cloneNode(true);
     const cb = node.querySelector("input");
     cb.value = ts.id;
-    cb.checked = selectedIds.has(ts.id);
+    cb.checked = selectedIds.has(String(ts.id));
     node.querySelector(".course-label").textContent = ts.label;
     grid.appendChild(node);
   }
@@ -1362,7 +1368,7 @@ function buildTourSteps() {
     {
       view: "list",
       title: "Welcome to sdgolf-monitor",
-      body: "Tee-time alerts for the SD city courses (Balboa, Torrey Pines), Coronado, and the Navy courses (Admiral Baker, Sea 'N Air). Quick tour — under a minute.",
+      body: "Tee-time alerts for the SD city courses (Balboa, Torrey Pines), Coronado, the Navy courses (Admiral Baker, Sea 'N Air), and Encinitas Ranch resale. Quick tour — under a minute.",
     },
     {
       view: "list",
@@ -1682,8 +1688,8 @@ function readForm(form) {
   // on how far out the slot is, since the date alone determines it.
   const targets = [];
   for (const cb of form.querySelectorAll('input[name="course"]:checked')) {
-    const id = parseInt(cb.value, 10);
-    const meta = TEESHEETS.find(ts => ts.id === id);
+    // Match by string so Golf District's UUID ids work alongside integer ids.
+    const meta = TEESHEETS.find(ts => String(ts.id) === cb.value);
     if (!meta) continue;
     if (meta.provider === "teeitup") {
       targets.push({
@@ -1698,8 +1704,14 @@ function readForm(form) {
         provider: "webtrac",
         secondarycode: meta.secondarycode,
       });
+    } else if (meta.provider === "golfdistrict") {
+      targets.push({
+        name: meta.label,
+        provider: "golfdistrict",
+        course_id: meta.course_id,
+      });
     } else {
-      targets.push({ name: meta.label, teesheet_id: id });
+      targets.push({ name: meta.label, teesheet_id: meta.id });
     }
   }
   if (targets.length === 0) throw new Error("Select at least one course");

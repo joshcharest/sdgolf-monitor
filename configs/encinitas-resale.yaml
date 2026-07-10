@@ -1,0 +1,18 @@
+enabled: true
+description: "Encinitas Ranch prepaid tee times being resold by other golfers (Golf District marketplace)"
+targets:
+  # provider=golfdistrict surfaces only SECOND_HAND (resale) listings.
+  # The name must match the schema.js label / notify.py map key exactly.
+  - name: Encinitas Ranch (resale)
+    provider: golfdistrict
+    course_id: 3f755992-90e0-11ef-9af2-6a003139847e
+dates:
+  start: today
+  end: today+60          # the marketplace lists ~60 days out
+filter:
+  holes:
+    - 18                 # Encinitas resale is 18-hole only
+  min_players: 1         # any listing; a resale may have 1-4 slots left
+  windows:
+    - start: '06:00'
+      end: '19:00'

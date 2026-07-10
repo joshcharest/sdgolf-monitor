@@ -1,8 +1,9 @@
 # sdgolf-monitor
 
 Polls San Diego golf tee sheets — City courses (Balboa Park 9/18, Torrey
-Pines N/S via ForeUp), Coronado (via TeeItUp), and the Navy MWR courses
-(Admiral Baker N/S, Sea 'N Air via WebTrac) — on a schedule and emails
+Pines N/S via ForeUp), Coronado (via TeeItUp), the Navy MWR courses
+(Admiral Baker N/S, Sea 'N Air via WebTrac), and Encinitas Ranch prepaid
+resales (via the Golf District marketplace) — on a schedule and emails
 you when a new slot matching your filter shows up. Designed to run as a
 GitHub Actions cron job — no servers, no AWS, no browser.
 
@@ -76,6 +77,8 @@ targets:
   - { name: "Coronado (3-14d)", provider: teeitup,
       facility_id: 10985, alias: coronado-gc-3-14-be }
   - { name: "Admiral Baker North", provider: webtrac, secondarycode: 28 }
+  - { name: "Encinitas Ranch (resale)", provider: golfdistrict,
+      course_id: 3f755992-90e0-11ef-9af2-6a003139847e }
 dates:
   start: today          # also accepts ISO dates like 2026-06-01
   end: today+90
@@ -131,14 +134,17 @@ pytest
   server-rendered search results table, so a portal redesign would break
   it. No prices are published in search results (Navy green fees depend
   on patron category), so fee filters don't apply to those courses.
-- CPS.golf / Club Prophet courses (Encinitas Ranch, The Crossings, Rancho
-  Bernardo Inn, Twin Oaks — the JC Golf tenants) are **not supported**.
-  Their tee-time API sits behind a Cloudflare *browser-integrity*
-  challenge that returns `403 cf-mitigated: challenge` to any non-browser
-  HTTP client — confirmed from both datacenter (GitHub runner) and
-  residential IPs, so it's not an IP-reputation block. The vendor's own
-  app passes only because it's a real browser (a Gallus Golf WebView).
-  Reaching it headlessly would require defeating the bot challenge, which
-  is out of scope.
+- Encinitas Ranch is covered via the **Golf District resale marketplace**
+  (`provider: golfdistrict`) — the prepaid tee times other golfers list
+  for resale (second-hand only; the course's own first-hand inventory is
+  filtered out as noise). Golf District has no green-fee translation; the
+  `pricePerGolfer` shown is the actual resale price.
+- The **primary** JC Golf / CPS.golf tee sheet (Encinitas, The Crossings,
+  Rancho Bernardo Inn, Twin Oaks) is **not** reachable — that booking API
+  sits behind a Cloudflare *browser-integrity* challenge that returns
+  `403 cf-mitigated: challenge` to any non-browser HTTP client (confirmed
+  from both datacenter and residential IPs, so it's not an IP block).
+  Only the resale marketplace above (a separate, Vercel-hosted system) is
+  accessible headlessly.
 - Monitoring only — this does not book tee times. Booking requires
   card-on-file and a captcha flow that isn't worth automating.

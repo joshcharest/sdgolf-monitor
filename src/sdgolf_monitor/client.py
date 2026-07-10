@@ -58,15 +58,18 @@ class Target:
     courses like Coronado, set ``provider="teeitup"`` and populate
     ``facility_id`` + ``alias`` instead of teesheet_id/booking_class. For
     WebTrac-backed courses like Admiral Baker, set ``provider="webtrac"``
-    and populate ``secondarycode``.
+    and populate ``secondarycode``. For Golf District resale courses like
+    Encinitas Ranch, set ``provider="golfdistrict"`` and populate
+    ``course_id``.
     """
     name: str                                # human-readable, e.g. "Balboa Park 18"
     teesheet_id: int | None = None           # ForeUp: schedule_id query param
     booking_class: int | None = None         # ForeUp: account-allowed booking class
-    provider: str = "foreup"                 # "foreup", "teeitup", or "webtrac"
+    provider: str = "foreup"                 # foreup | teeitup | webtrac | golfdistrict
     facility_id: int | None = None           # TeeItUp: golfFacilityId
     alias: str | None = None                 # TeeItUp: x-be-alias / subdomain
     secondarycode: int | None = None         # WebTrac: course code in the portal
+    course_id: str | None = None             # Golf District: course UUID in the URL
 
 
 @dataclass(frozen=True)

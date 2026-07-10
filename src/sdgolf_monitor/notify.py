@@ -13,6 +13,7 @@ from email.message import EmailMessage
 from html import escape as html_escape
 
 from .client import TeeTime
+from .golfdistrict import booking_url as _golfdistrict_booking_url
 from .webtrac import booking_url as _webtrac_booking_url
 
 # 90 days is long enough that anyone who saved an old email can still click
@@ -99,6 +100,13 @@ _WEBTRAC_COURSES = {
     "Sea 'N Air": 27,
 }
 
+# Golf District resale courses keyed by target name -> course UUID. The
+# marketplace page is the deep-link — see golfdistrict.booking_url. Mirror
+# of the golfdistrict entries in ui/schema.js TEESHEETS — keep in sync.
+_GOLFDISTRICT_COURSES = {
+    "Encinitas Ranch (resale)": "3f755992-90e0-11ef-9af2-6a003139847e",
+}
+
 
 def _is_iso_date(s: str) -> bool:
     try:
@@ -127,6 +135,9 @@ def _booking_url(target: str, date_iso: str) -> str | None:
     webtrac_code = _WEBTRAC_COURSES.get(target)
     if webtrac_code is not None:
         return _webtrac_booking_url(webtrac_code, date_iso)
+    gd_course = _GOLFDISTRICT_COURSES.get(target)
+    if gd_course is not None:
+        return _golfdistrict_booking_url(gd_course)
     ids = _COURSE_IDS.get(target)
     if not ids:
         return None
@@ -196,6 +207,10 @@ def _fee_text(target: str, non_resident: float | None, booking_fee: float | None
     # depend on patron category), so show nothing rather than "?".
     if target in _WEBTRAC_COURSES:
         return ""
+    # Golf District resale prices are the actual per-golfer resale price —
+    # already final, not a non-resident rate to translate. Show as-is.
+    if target in _GOLFDISTRICT_COURSES:
+        return _fmt_money(non_resident) if non_resident is not None else ""
     rate = _resident_rate(target, non_resident)
     base = _fmt_money(rate) if rate is not None else "?"
     if not _has_advanced_fee(booking_fee):
@@ -705,6 +720,8 @@ def _plaintext(
                 vendor = "TeeItUp"
             elif tt.target in _WEBTRAC_COURSES:
                 vendor = "WebTrac"
+            elif tt.target in _GOLFDISTRICT_COURSES:
+                vendor = "Golf District"
             else:
                 vendor = "ForeUp"
             lines.append(f"    Open in {vendor}: {url}")
