@@ -1,7 +1,8 @@
 enabled: true
-description: "Encinitas Ranch prepaid tee times being resold by other golfers (Golf District marketplace)"
+description: "Encinitas Ranch tee times on the Golf District marketplace (course listings + golfer resales)"
 targets:
-  # provider=golfdistrict surfaces only SECOND_HAND (resale) listings.
+  # provider=golfdistrict surfaces the course's own marketplace listings and
+  # golfer resales (resales are flagged in alerts and the UI).
   # The name must match the schema.js label / notify.py map key exactly.
   - name: Encinitas Ranch (Golf District)
     provider: golfdistrict

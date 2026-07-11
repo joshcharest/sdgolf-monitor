@@ -2,8 +2,8 @@
 
 Polls San Diego golf tee sheets — City courses (Balboa Park 9/18, Torrey
 Pines N/S via ForeUp), Coronado (via TeeItUp), the Navy MWR courses
-(Admiral Baker N/S via WebTrac), and Encinitas Ranch prepaid
-resales (via the Golf District marketplace) — on a schedule and emails
+(Admiral Baker N/S via WebTrac), and Encinitas Ranch prepaid tee times
+and resales (via the Golf District marketplace) — on a schedule and emails
 you when a new slot matching your filter shows up. Designed to run as a
 GitHub Actions cron job — no servers, no AWS, no browser.
 
@@ -134,11 +134,13 @@ pytest
   server-rendered search results table, so a portal redesign would break
   it. No prices are published in search results (Navy green fees depend
   on patron category), so fee filters don't apply to those courses.
-- Encinitas Ranch is covered via the **Golf District resale marketplace**
-  (`provider: golfdistrict`) — the prepaid tee times other golfers list
-  for resale (second-hand only; the course's own first-hand inventory is
-  filtered out as noise). Golf District has no green-fee translation; the
-  `pricePerGolfer` shown is the actual resale price.
+- Encinitas Ranch is covered via the **Golf District marketplace**
+  (`provider: golfdistrict`) — both the course's own prepaid listings and
+  the tee times other golfers list for resale (the latter flagged "resale"
+  in alerts and the UI). The course's first-hand side is sparse prepaid
+  inventory (a few slots per day, typically nothing in the near term), not
+  a full tee sheet. Golf District has no green-fee translation; the
+  `pricePerGolfer` shown is the actual final price.
 - The **primary** JC Golf / CPS.golf tee sheet (Encinitas, The Crossings,
   Rancho Bernardo Inn, Twin Oaks) is **not** reachable — that booking API
   sits behind a Cloudflare *browser-integrity* challenge that returns

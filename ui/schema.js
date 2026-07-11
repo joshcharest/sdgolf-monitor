@@ -20,10 +20,12 @@
 //   ``secondarycode`` course code on the myffr.navyaims.com portal
 //   (28 = Admiral Baker North, 29 = South).
 //
-// golfdistrict (JC Golf prepaid RESALE marketplace): ``id`` is the Golf
-//   District ``course_id`` UUID from the page URL. This surfaces tee times
-//   golfers are reselling, not the primary tee sheet. Note the string id —
-//   the UI id handling is string-safe to accommodate these UUIDs.
+// golfdistrict (JC Golf prepaid marketplace): ``id`` is the Golf
+//   District ``course_id`` UUID from the page URL. This surfaces the
+//   marketplace's tee times — the course's own prepaid listings plus
+//   golfer resales (flagged "resale") — not the primary CPS tee sheet,
+//   which isn't reachable headlessly. Note the string id — the UI id
+//   handling is string-safe to accommodate these UUIDs.
 export const TEESHEETS = [
   { id: 1470,  label: "Balboa Park 18",     provider: "foreup",  facility: 19348 },
   { id: 1490,  label: "Balboa Park 9",      provider: "foreup",  facility: 19348 },

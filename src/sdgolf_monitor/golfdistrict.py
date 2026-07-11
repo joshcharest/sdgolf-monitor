@@ -11,11 +11,14 @@ Discovery notes (probed 2026-07):
   ``course_id`` (the UUID in the page URL) picks the course — Encinitas
   Ranch = ``3f755992-90e0-11ef-9af2-6a003139847e``.
 - The tRPC route ``searchRouter.getTeeTimesForDay`` takes a course + a single
-  day + filters and returns BOTH the course's own first-hand inventory and
-  golfer resale listings, tagged by ``firstOrSecondHandTeeTime``. We keep
-  only ``SECOND_HAND`` — the resale slots this monitor is about. First-hand
-  is effectively always-available primary inventory and would just be noise
-  (and its records are a different, larger shape — parse defensively).
+  day + filters and returns BOTH the course's own first-hand marketplace
+  listings and golfer resale listings, tagged by ``firstOrSecondHandTeeTime``.
+  Both kinds surface as TeeTimes (resales flagged via ``TeeTime.resale``):
+  first-hand is NOT the course's full tee sheet — it's sparse prepaid
+  inventory (a handful of slots per day, none in the near term), and it's the
+  only Encinitas inventory reachable headlessly, so it's signal too. Records
+  of the two kinds differ in shape — parse defensively; unknown kinds are
+  dropped.
 - Per record: ``date`` is a course-local ISO datetime (no tz), ``time`` is
   HHMM, ``numberOfHoles`` is 9/18, ``pricePerGolfer`` is dollars (final),
   and ``availableSlots`` is how many of the listing's slots are still
@@ -69,13 +72,13 @@ class GolfDistrictClient:
         })
 
     def get_times(self, target: Target, date: str, holes: int | str = 18) -> list[TeeTime]:
-        """Fetch resale (second-hand) listings for one course-local date."""
+        """Fetch marketplace listings (course + resale) for one course-local date."""
         if not target.course_id:
             raise ValueError(f"golfdistrict target {target.name!r} missing course_id")
         out: list[TeeTime] = []
         for raw in self._fetch_day(target.course_id, date):
-            if raw.get("firstOrSecondHandTeeTime") != "SECOND_HAND":
-                continue  # skip the course's own first-hand inventory
+            if raw.get("firstOrSecondHandTeeTime") not in ("FIRST_HAND", "SECOND_HAND"):
+                continue  # unknown/missing kind — don't guess at its shape
             tt = _record_to_teetime(raw, target.name)
             if tt is None:
                 continue
@@ -150,6 +153,7 @@ def _record_to_teetime(r: dict[str, Any], target_name: str) -> TeeTime | None:
         holes=holes,
         green_fee=_to_price(r.get("pricePerGolfer")),
         booking_fee=None,
+        resale=r.get("firstOrSecondHandTeeTime") == "SECOND_HAND",
     )
 
 

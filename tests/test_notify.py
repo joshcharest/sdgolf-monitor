@@ -38,3 +38,22 @@ def test_html_links_coronado_time():
     )
     html = notify._html([tt])
     assert "coronado-gc-3-14-be.book.teeitup.com" in html
+
+
+def test_fee_text_golfdistrict_tags_resales():
+    target = "Encinitas Ranch (Golf District)"
+    assert notify._fee_text(target, 154.0, None, True) == "$154 (resale)"
+    assert notify._fee_text(target, 143.0, None, False) == "$143"
+    assert notify._fee_text(target, None, None, True) == "(resale)"
+
+
+def test_html_tags_golfdistrict_resale():
+    from sdgolf_monitor.client import TeeTime
+
+    tt = TeeTime(
+        target="Encinitas Ranch (Golf District)", date="2026-07-24", time="13:03",
+        available_spots=1, holes=18, green_fee=154.0, booking_fee=None, resale=True,
+    )
+    html = notify._html([tt])
+    assert "jcresorts.golfdistrict.com" in html
+    assert "(resale)" in html

@@ -661,15 +661,23 @@ function buildTimeLi(m, onBook) {
   primary.className = "match-time-primary";
   primary.append(mkSpan("match-when", fmt12h(m.time)));
 
-  const rate = residentRate(m.target, m.green_fee);
-  const fee = rate == null ? null : `$${rate % 1 === 0 ? rate : rate.toFixed(2)}`;
+  const provider = TEESHEETS.find(t => t.label === m.target)?.provider ?? "foreup";
+  let fee = null;
+  if (provider === "golfdistrict") {
+    // Golf District prices are final per-golfer prices — show as-is.
+    const gf = m.green_fee;
+    fee = typeof gf === "number" ? `$${gf % 1 === 0 ? gf : gf.toFixed(2)}` : null;
+  } else {
+    const rate = residentRate(m.target, m.green_fee);
+    fee = rate == null ? null : `$${rate % 1 === 0 ? rate : rate.toFixed(2)}`;
+  }
   let bf = null;
   if (hasAdvancedBookingFee(m)) {
     const amount = ADVANCED_BOOKING_FEE[m.target];
     bf = amount != null ? `+ $${amount} Advanced Booking Fee` : "+ Advanced Booking Fee";
   }
   const money = [fee, bf].filter(Boolean).join(" ");
-  const metaParts = [`${m.available_spots}p`, `${m.holes}`, money].filter(Boolean);
+  const metaParts = [`${m.available_spots}p`, `${m.holes}`, money, m.resale ? "resale" : null].filter(Boolean);
   const meta = document.createElement("div");
   meta.className = "match-meta";
   meta.textContent = metaParts.join(" · ");
@@ -680,7 +688,6 @@ function buildTimeLi(m, onBook) {
   // Only ForeUp slots are bookable through the worker (it holds a single
   // ForeUp login; no auth/captcha automation for TeeItUp or WebTrac).
   // Everything else gets the link-only UX.
-  const provider = TEESHEETS.find(t => t.label === m.target)?.provider ?? "foreup";
   if (onBook && provider === "foreup") {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -743,7 +750,7 @@ function bookingUrl(m) {
     return `https://myffr.navyaims.com/navywest/webtrac/web/search.html?${params.toString()}`;
   }
   if (ts?.provider === "golfdistrict") {
-    // Resale marketplace page for the course — lands on its live listings.
+    // Marketplace page for the course — lands on its live listings.
     return `https://jcresorts.golfdistrict.com/${ts.course_id}`;
   }
   const bookingClass = m.booking_fee ? 51735 : 929;
@@ -1511,7 +1518,7 @@ function buildTourSteps() {
     {
       view: "list",
       title: "Welcome to sdgolf-monitor",
-      body: "Tee-time alerts for the SD city courses (Balboa, Torrey Pines), Coronado, the Navy courses (Admiral Baker N/S), and Encinitas Ranch resale. Quick tour — under a minute.",
+      body: "Tee-time alerts for the SD city courses (Balboa, Torrey Pines), Coronado, the Navy courses (Admiral Baker N/S), and Encinitas Ranch (Golf District). Quick tour — under a minute.",
     },
     {
       view: "list",

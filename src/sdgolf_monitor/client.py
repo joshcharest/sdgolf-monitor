@@ -81,10 +81,18 @@ class TeeTime:
     holes: int
     green_fee: float | None
     booking_fee: float | None
+    # Golf District only: True = a golfer's resale listing, False = the
+    # course's own marketplace listing. None for providers without the concept.
+    resale: bool | None = None
 
     @property
     def key(self) -> str:
-        return f"{self.target}|{self.date}|{self.time}|{self.holes}"
+        # A resale listing is distinct inventory from the course's own listing
+        # at the same tee time, so it gets its own dedup key (and its own
+        # alert). Keys for non-resale slots are unchanged, so existing state
+        # files stay valid.
+        base = f"{self.target}|{self.date}|{self.time}|{self.holes}"
+        return f"{base}|resale" if self.resale else base
 
 
 class ForeUpAuthError(RuntimeError):

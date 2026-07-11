@@ -401,6 +401,7 @@ def _match_dict(tt: TeeTime) -> dict:
         "available_spots": tt.available_spots,
         "green_fee": tt.green_fee,
         "booking_fee": tt.booking_fee,
+        "resale": tt.resale,
     }
 
 

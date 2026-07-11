@@ -1,8 +1,8 @@
-"""Tests for the Golf District resale parser + filtering.
+"""Tests for the Golf District marketplace parser + filtering.
 
 The HTTP layer is exercised in dry-run runs; here we lock in the
-record-to-TeeTime conversion and the get_times filtering rules
-(SECOND_HAND only, exact-date, holes) that make this a resale-only feed.
+record-to-TeeTime conversion and the get_times filtering rules (both
+listing kinds surface with resales flagged, exact-date, holes).
 """
 
 from __future__ import annotations
@@ -59,6 +59,24 @@ def test_record_maps_fields():
     assert tt.available_spots == 1  # availableSlots, not listedSlots
     assert tt.green_fee == 154.0    # pricePerGolfer, shown as-is
     assert tt.booking_fee is None
+    assert tt.resale is True
+
+
+def test_record_first_hand_is_not_resale():
+    tt = _record_to_teetime(_first_hand(), "X")
+    assert tt is not None
+    assert tt.resale is False
+    assert tt.available_spots == 4
+    assert tt.green_fee == 143.0
+
+
+def test_resale_gets_its_own_dedup_key():
+    # A golfer resale at the same tee time as a course listing is distinct
+    # inventory — it must alert separately, so the keys must differ.
+    resale = _record_to_teetime(_resale(), "X")
+    first = _record_to_teetime(_first_hand(), "X")
+    assert first.key == "X|2026-07-24|13:03|18"   # unchanged legacy shape
+    assert resale.key == "X|2026-07-24|13:03|18|resale"
 
 
 def test_record_available_spots_falls_back_to_listed():
@@ -80,11 +98,23 @@ def test_record_price_rounds_and_tolerates_junk():
 
 # --- get_times filtering ----------------------------------------------------
 
-def test_get_times_keeps_only_second_hand():
+def test_get_times_includes_both_listing_kinds():
     recs = [_resale(), _first_hand(), _first_hand(date="2026-07-24T11:06:00")]
     out = _client(recs).get_times(_target(), "2026-07-24", holes="all")
+    assert len(out) == 3
+    assert sorted((t.time, t.resale) for t in out) == [
+        ("11:06", False), ("13:03", False), ("13:03", True),
+    ]
+
+
+def test_get_times_drops_unknown_listing_kinds():
+    # Parse defensively: a kind we haven't seen may have a different shape.
+    odd = _resale()
+    odd["firstOrSecondHandTeeTime"] = "THIRD_HAND"
+    missing = _resale()
+    del missing["firstOrSecondHandTeeTime"]
+    out = _client([odd, missing, _resale()]).get_times(_target(), "2026-07-24", holes="all")
     assert len(out) == 1
-    assert out[0].time == "13:03"
 
 
 def test_get_times_drops_neighbouring_dates():

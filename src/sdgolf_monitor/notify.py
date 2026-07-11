@@ -108,7 +108,7 @@ _WEBTRAC_COURSES = {
     "Admiral Baker South": 29,
 }
 
-# Golf District resale courses keyed by target name -> course UUID. The
+# Golf District marketplace courses keyed by target name -> course UUID. The
 # marketplace page is the deep-link — see golfdistrict.booking_url. Mirror
 # of the golfdistrict entries in ui/schema.js TEESHEETS — keep in sync.
 _GOLFDISTRICT_COURSES = {
@@ -210,15 +210,18 @@ def _fmt_money(amount: float) -> str:
     return f"${amount:g}" if amount == int(amount) else f"${amount:.2f}"
 
 
-def _fee_text(target: str, non_resident: float | None, booking_fee: float | None) -> str:
+def _fee_text(target: str, non_resident: float | None, booking_fee: float | None,
+              resale: bool | None = None) -> str:
     # WebTrac never publishes prices in search results (Navy green fees
     # depend on patron category), so show nothing rather than "?".
     if target in _WEBTRAC_COURSES:
         return ""
-    # Golf District resale prices are the actual per-golfer resale price —
-    # already final, not a non-resident rate to translate. Show as-is.
+    # Golf District prices are the actual per-golfer price — already final,
+    # not a non-resident rate to translate. Show as-is, tagging golfer resale
+    # listings apart from the course's own marketplace listings.
     if target in _GOLFDISTRICT_COURSES:
-        return _fmt_money(non_resident) if non_resident is not None else ""
+        money = _fmt_money(non_resident) if non_resident is not None else ""
+        return f"{money} (resale)".strip() if resale else money
     rate = _resident_rate(target, non_resident)
     base = _fmt_money(rate) if rate is not None else "?"
     if not _has_advanced_fee(booking_fee):
@@ -528,7 +531,7 @@ def _confirmation_plaintext(verb: str, cfg: dict, matches: list[dict], *, unsubs
                 f"  {_fmt_date(m.get('date', '?'))}  {_fmt_12h(m.get('time', '?'))}  "
                 f"{m.get('target', '?')}  {m.get('available_spots', '?')} spots  "
                 f"{m.get('holes', '?')}  "
-                f"{_fee_text(m.get('target', ''), m.get('green_fee'), m.get('booking_fee'))}"
+                f"{_fee_text(m.get('target', ''), m.get('green_fee'), m.get('booking_fee'), m.get('resale'))}"
             )
             lines.append(line)
             url = _booking_url(m.get("target", ""), m.get("date", ""))
@@ -720,7 +723,7 @@ def _plaintext(
         lines.append(
             f"  {_fmt_date(tt.date)}  {_fmt_12h(tt.time)}  {tt.target}  "
             f"{tt.available_spots} spots  {tt.holes}  "
-            f"{_fee_text(tt.target, tt.green_fee, tt.booking_fee)}"
+            f"{_fee_text(tt.target, tt.green_fee, tt.booking_fee, getattr(tt, 'resale', None))}"
         )
         url = _booking_url(tt.target, tt.date)
         if url:
@@ -753,7 +756,7 @@ def _html(
     rows = []
     show_book_col = bool(book_urls) and any(book_urls.values())
     for tt in sorted(new_times, key=lambda t: (t.date, t.time, t.target)):
-        fee_text = _fee_text(tt.target, tt.green_fee, tt.booking_fee)
+        fee_text = _fee_text(tt.target, tt.green_fee, tt.booking_fee, getattr(tt, "resale", None))
         time_str = _fmt_12h(tt.time)
         url = _booking_url(tt.target, tt.date)
         time_cell = (
