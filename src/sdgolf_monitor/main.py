@@ -450,7 +450,7 @@ def cli() -> int:
         log.exception("failed to fetch welcomes; continuing without them")
         welcomes = []
     admin_emails = [
-        e.strip() for e in os.environ.get("ADMIN_EMAILS", "sdgolfmonitor@gmail.com").split(",") if e.strip()
+        e.strip() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()
     ]
     # The app-side email of whichever user "owns" the runner's ForeUp account
     # (i.e. would be charged if autobook books a slot). Autobook is restricted

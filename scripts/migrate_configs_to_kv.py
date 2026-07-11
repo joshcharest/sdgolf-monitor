@@ -2,7 +2,7 @@
 
 Run once after the Phase 2 worker is deployed:
 
-    python scripts/migrate_configs_to_kv.py sdgolfmonitor@gmail.com > /tmp/kv_bulk.json
+    python scripts/migrate_configs_to_kv.py you@example.com > /tmp/kv_bulk.json
     npx wrangler kv bulk put --binding=SNAPSHOT_KV --remote /tmp/kv_bulk.json
 
 After verifying the keys land (``npx wrangler kv key list --binding=SNAPSHOT_KV

@@ -2,7 +2,7 @@
 
 **Date:** July 10, 2026
 **Status:** Direction approved 2026-07-10 — SMS via Twilio toll-free; free alternatives (Telegram bot, PWA web push, Pushover, native app) evaluated and declined. Open questions in §10 still pending.
-**Owner:** Josh (sdgolfmonitor@gmail.com)
+**Owner:** Josh (contact: sdgolfmonitor@gmail.com)
 **Audience:** Josh + the coding agent implementing it. All `file:line` references were verified against `main` @ `5155167` on 2026-07-10.
 
 ---
@@ -238,7 +238,7 @@ Each bullet ≈ one commit. Python has no new pip dependencies (`requests` and `
 - [ ] **Verification (double opt-in / possession proof):** OTP text sent on enrollment — *"SDGolf Monitor: your code is 482913. Alerts for new tee times; freq varies. Msg&data rates may apply. Reply STOP to opt out, HELP for help."* (~139 GSM-7 chars — carries the CTIA-required first-message disclosures). Code entry flips `pending → active`; **the runner only ever sees `active`** — a typo'd digit can never subscribe a stranger. Not strictly required by TCPA/CTIA, but cheap insurance that also eases verification review.
 - [ ] **Consent records:** timestamp, CF-Connecting-IP, user agent, `disclosure_version` pinning the exact checkbox text, form URL, phone, plus the full opt-out/verify event history — stored in `sms:<email>`, **retained ≥5 years** (TCPA SoL is 4 years; without records courts effectively presume non-compliance). Survives account deletion; disclosed in `privacy.html`.
 - [ ] **STOP (revocation), four layers, none dependent on our uptime:** (1) Twilio carrier-level auto-handling of STOP/STOPALL/UNSUBSCRIBE/CANCEL/END/QUIT/REVOKE/OPTOUT (last two added 2025-05-13 per FCC) — instant, provider-guaranteed; (2) runner catches 21610 → `/api/internal/sms-optout` → KV truth within one tick; (3) "Turn off texts" in the modal; (4) existing HMAC email-unsubscribe removes the user from a config, stopping *both* channels for that set. All comfortably inside the FCC any-reasonable-means / 10-business-day rule (effective 2025-04-11).
-- [ ] **HELP:** Twilio console auto-response with program name + sdgolfmonitor@gmail.com. Zero code.
+- [ ] **HELP:** Twilio console auto-response with program name + sdgolfmonitor@gmail.com (dedicated Gmail created 2026-07-10, auto-forwards to Josh's inbox — the public support contact everywhere user-facing). Zero code.
 - [ ] **Brand identification:** every message starts `SDGolf:` / `SDGolf Monitor:`; `Txt STOP to end` rides in alert bodies whenever the segment budget allows (it's the first ladder drop; the enrollment text always carries it).
 - [ ] **US-only scope:** `+1` E.164 validation hardcoded (all recipients are San Diego friends) — keeps everything inside US TCPA/CTIA and toll-free verification scope.
 - [ ] **Registration evidence coherence:** TFV submission uses the deployed opt-in modal URL + screenshot and `/privacy.html`, with sample messages **matching the real `compose_alert`/OTP strings** — the filing and the code describe the same system.
@@ -254,7 +254,7 @@ Each bullet ≈ one commit. Python has no new pip dependencies (`requests` and `
 2. Buy one **toll-free number** ($2.15/mo). Note it as `TWILIO_FROM_NUMBER` (E.164, `+18XX…`).
 3. Deploy `ui/privacy.html` (tiny static commit) and screenshot the opt-in modal (a branch build is fine) — this is the opt-in evidence.
 4. Submit **Toll-Free Verification** from the Twilio console: `businessType=SOLE_PROPRIETOR`, marking the EIN/BRN as not available (permitted for filers genuinely without one, per Twilio's changelog); business fields = Josh's personal details (explicitly allowed for hobbyists per Twilio docs); use case *"personal golf tee-time availability alerts to a small opt-in group of friends"*; opt-in flow description + modal screenshot + `https://sdgolf-monitor.joshcharest1.workers.dev/privacy.html`; sample messages = the real alert + OTP strings from §5/§6; message volume "under 500/month". **Free; approval up to ~10 business days.** *(as of 2026-07-10)*
-5. In the console: confirm default opt-out handling is active (it is, automatically, on toll-free); set the **HELP auto-response** to include `sdgolfmonitor@gmail.com`; create a **usage trigger** alerting at **$15/month**.
+5. In the console: confirm default opt-out handling is active (it is, automatically, on toll-free); set the **HELP auto-response** to include `sdgolfmonitor@gmail.com` (the public support address, matching `privacy.html`); create a **usage trigger** alerting at **$15/month**.
 6. **Fallback if TFV rejects** (EIN-less sole-prop approval is "not guaranteed" per Bandwidth/Telgorithm, 2026-01): file A2P 10DLC Sole Proprietor on the same account — brand $4–4.50 + campaign vetting $15 + $1 T-Mobile activation (one-time), $2/mo campaign, $1.15/mo local number, OTP verification to Josh's personal mobile, 1–4 weeks. Then swap `TWILIO_FROM_NUMBER`. No code change.
 
 **Secrets (set only when verification approves — code merges safely before this):**

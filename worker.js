@@ -192,9 +192,9 @@ async function readAllowedEmails(env) {
 }
 
 function adminEmails(env) {
-  // Comma-separated email list for admin privileges. Hardcoded default lets
-  // the maintainer manage things without yet another Worker secret.
-  const raw = env.ADMIN_EMAILS || "sdgolfmonitor@gmail.com";
+  // Comma-separated email list for admin privileges. Must be set as a Worker
+  // secret (ADMIN_EMAILS) — unset means no admin access at all.
+  const raw = env.ADMIN_EMAILS || "";
   return raw.split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
 }
 
@@ -986,7 +986,8 @@ function escapeHtml(s) {
 // (matches the runner's AUTOBOOK_OWNER_EMAIL gating). Without this, a
 // subscriber could trigger a charge on the runner's card.
 function bookingOwnerEmail(env) {
-  return (env.AUTOBOOK_OWNER_EMAIL || "sdgolfmonitor@gmail.com").trim().toLowerCase();
+  // Worker secret; unset disables the owner Book actions entirely.
+  return (env.AUTOBOOK_OWNER_EMAIL || "").trim().toLowerCase();
 }
 
 function slotKey(s) {
