@@ -10,11 +10,20 @@ import smtplib
 import time
 from datetime import date, datetime
 from email.message import EmailMessage
+from email.utils import formataddr
 from html import escape as html_escape
 
 from .client import TeeTime
 from .golfdistrict import booking_url as _golfdistrict_booking_url
 from .webtrac import booking_url as _webtrac_booking_url
+
+# Display name for every outgoing email; the address is whatever account
+# GMAIL_USERNAME authenticates as.
+SENDER_NAME = "SDGolf Monitor"
+
+
+def _from_header(smtp_user: str) -> str:
+    return formataddr((SENDER_NAME, smtp_user))
 
 # 90 days is long enough that anyone who saved an old email can still click
 # through, but short enough that a leaked URL eventually stops working.
@@ -245,7 +254,7 @@ def send_autobook_email(
     """
     prefix = "AUTO-BOOK (dry run)" if dry_run else "AUTO-BOOK"
     msg = EmailMessage()
-    msg["From"] = smtp_user
+    msg["From"] = _from_header(smtp_user)
     msg["To"] = to_addr
     msg["Subject"] = (
         f"[sdgolf:{set_name}] {prefix} — {_fmt_date(slot.date)} {_fmt_12h(slot.time)} {slot.target}"
@@ -319,7 +328,7 @@ def send_welcome_email(
     if not to_addr:
         return
     msg = EmailMessage()
-    msg["From"] = smtp_user
+    msg["From"] = _from_header(smtp_user)
     msg["To"] = to_addr
     msg["Subject"] = "[sdgolf] You've been added to sdgolf-monitor"
     msg.set_content(_welcome_plaintext(signup_url))
@@ -375,7 +384,7 @@ def send_bug_report(
     description = bug.get("description", "(none)")
     short_desc = description.splitlines()[0][:80] if description else "(none)"
     msg = EmailMessage()
-    msg["From"] = smtp_user
+    msg["From"] = _from_header(smtp_user)
     msg["To"] = ", ".join(to_addrs)
     msg["Subject"] = f"[sdgolf:bug] {reporter}: {short_desc}"
     msg.set_content(_bug_plaintext(bug))
@@ -473,7 +482,7 @@ def send_confirmation_email(
         if action == "subscribe" else None
     )
     msg = EmailMessage()
-    msg["From"] = smtp_user
+    msg["From"] = _from_header(smtp_user)
     msg["To"] = to_addr
     msg["Subject"] = f"[sdgolf:{set_name}] You {verb} {set_name}"
     _set_list_unsubscribe(msg, unsub)
@@ -645,7 +654,7 @@ def send_email(
             # able to redeem it anyway (worker checks owner-account match).
             urls_for_recipient = book_urls if is_owner else None
             msg = EmailMessage()
-            msg["From"] = smtp_user
+            msg["From"] = _from_header(smtp_user)
             msg["To"] = addr
             msg["Subject"] = _subject(set_name, their_times)
             _set_list_unsubscribe(msg, unsub)
