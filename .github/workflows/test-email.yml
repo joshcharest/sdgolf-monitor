@@ -1,0 +1,55 @@
+name: test-email
+
+# Manually send a test alert digest (fake tee times) to one recipient, using
+# the same notify.send_email path + Gmail secrets as production alerts. For
+# checking deliverability / rendering without touching real check sets.
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: "Recipient email address"
+        required: true
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -e .
+
+      - name: Send test alert digest
+        env:
+          GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          TO_ADDR: ${{ inputs.to }}
+        run: |
+          python <<'PY'
+          import os
+          from datetime import date, timedelta
+
+          from sdgolf_monitor.client import TeeTime
+          from sdgolf_monitor.notify import send_email
+
+          d1 = (date.today() + timedelta(days=1)).isoformat()
+          d2 = (date.today() + timedelta(days=2)).isoformat()
+          slots = [
+              TeeTime("Balboa Park 18", d1, "07:00", 4, 18, 56.50, None),
+              TeeTime("Torrey Pines South", d2, "10:30", 2, 18, 258.0, None),
+          ]
+          to = os.environ["TO_ADDR"]
+          send_email(
+              smtp_user=os.environ["GMAIL_USERNAME"],
+              smtp_password=os.environ["GMAIL_APP_PASSWORD"],
+              to_addrs=[to],
+              set_name="Test Alert",
+              new_times=slots,
+          )
+          print(f"test digest sent to {to}: {len(slots)} fake slot(s)")
+          PY
