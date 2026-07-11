@@ -415,7 +415,6 @@ async function readUserAway(env, email) {
 //           stopped  = texted STOP (carrier-blocked, error 21610) or invalid
 //           disabled = turned off in the UI, or admin removed the account
 
-const SMS_WINDOWS = ["standard", "early_bird"];  // 8am–9pm PT | 5am–9pm PT
 const SMS_DISCLOSURE_VERSION = "v1";             // pins the checkbox text shown at consent
 const SMS_OPTOUT_REASONS = ["stop_21610", "invalid_21211"];
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -546,7 +545,6 @@ async function handleGetSms(request, env) {
   return json({
     status: rec.status,
     phone_masked: maskPhone(rec.phone),
-    window: rec.window || "standard",
     from_number: configured ? env.TWILIO_FROM_NUMBER : null,
     otp_configured: configured,
   });
@@ -578,7 +576,6 @@ async function handlePutSms(request, env) {
   }
 
   const phone = normalisePhone(body?.phone);
-  const window_ = SMS_WINDOWS.includes(body?.window) ? body.window : "standard";
   if (!phone) return json({ error: "a valid US mobile number is required" }, 400);
   if (body?.consent !== true) return json({ error: "consent is required" }, 400);
 
@@ -595,11 +592,9 @@ async function handlePutSms(request, env) {
 
   const existing = await readUserSms(env, session.email);
 
-  // Already verified on this same number: nothing to re-prove. (Changing the
-  // texting window means re-enrolling — the window is part of the recorded
-  // consent, deliberately.)
+  // Already verified on this same number: nothing to re-prove.
   if (existing && existing.status === "active" && existing.phone === phone) {
-    return json({ status: "active", phone_masked: maskPhone(phone), window: existing.window || "standard" });
+    return json({ status: "active", phone_masked: maskPhone(phone) });
   }
 
   const minted = await mintOtp(existing?.verify?.sends);
@@ -609,7 +604,6 @@ async function handlePutSms(request, env) {
   const rec = {
     phone,
     status: "pending",
-    window: window_,
     consent: {
       ts: now,
       ip: request.headers.get("CF-Connecting-IP") || "",
@@ -671,7 +665,7 @@ async function handleVerifySms(request, env) {
   delete rec.verify;
   smsHistoryPush(rec, "verified");
   await env.SNAPSHOT_KV.put(smsKey(session.email), JSON.stringify(rec));
-  return json({ status: "active", phone_masked: maskPhone(rec.phone), window: rec.window || "standard" });
+  return json({ status: "active", phone_masked: maskPhone(rec.phone) });
 }
 
 async function handleDeleteSms(request, env) {
@@ -1208,7 +1202,7 @@ async function handleInternalConfigs(request, env) {
     const [dates, sms] = await Promise.all([readUserAway(env, email), readUserSms(env, email)]);
     if (dates.length) awayByEmail[email] = dates;
     if (sms && sms.status === "active" && sms.phone) {
-      smsByEmail[email] = { phone: sms.phone, window: sms.window || "standard" };
+      smsByEmail[email] = { phone: sms.phone };
     }
   }));
   for (const cfg of configs) {

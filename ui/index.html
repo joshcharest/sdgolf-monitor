@@ -269,17 +269,10 @@
             <label>Mobile number (US)
               <input type="tel" name="phone" autocomplete="tel" placeholder="(619) 555-0134" required />
             </label>
-            <label>Texting hours
-              <select name="window">
-                <option value="standard" selected>8am–9pm PT (default)</option>
-                <option value="early_bird">Early bird — 5am–9pm PT</option>
-              </select>
-            </label>
             <label class="inline sms-consent">
               <input type="checkbox" name="consent" />
               <span>Text me new tee-time alerts from <strong>SDGolf Monitor</strong>. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to cancel, HELP for help. See the <a href="/privacy" target="_blank" rel="noopener">privacy policy</a>.</span>
             </label>
-            <p class="hint">Texts arrive only during your texting hours — email always arrives regardless.</p>
             <footer class="edit-footer">
               <button type="submit" class="primary" disabled>Send verification code</button>
               <button type="button" class="sms-cancel">Cancel</button>
@@ -304,7 +297,6 @@
 
         <div class="sms-state" data-state="active" hidden>
           <p>Text alerts are <strong>on</strong> for <strong class="sms-phone"></strong>.</p>
-          <p class="hint">Texting hours: <span class="sms-hours"></span>. To change hours, turn off texts and enroll again.</p>
           <p class="hint">Reply STOP to any text to stop instantly, HELP for help. Email alerts continue either way.</p>
           <footer class="edit-footer">
             <button type="button" class="danger sms-disable">Turn off texts</button>

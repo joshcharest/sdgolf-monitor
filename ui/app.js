@@ -1401,8 +1401,6 @@ async function openSmsModal() {
     }
     const from = backdrop.querySelector(".sms-from");
     if (from) from.textContent = s.from_number || "our texting number";
-    const hours = backdrop.querySelector(".sms-hours");
-    if (hours) hours.textContent = s.window === "early_bird" ? "Early bird — 5am–9pm PT" : "8am–9pm PT";
     // "no code was sent" hint: enrollment succeeded but the OTP text didn't
     // go out (Twilio secrets not set yet, or a transient send failure).
     const missing = backdrop.querySelector(".sms-otp-missing");
@@ -1437,7 +1435,7 @@ async function openSmsModal() {
     if (!phone) { showError("Enter a valid US mobile number."); return; }
     enrollSubmit.disabled = true; enrollSubmit.textContent = "Sending…";
     try {
-      const resp = await apiPutSms({ phone, window: enrollForm.window.value, consent: true });
+      const resp = await apiPutSms({ phone, consent: true });
       fill(resp); show(resp.status);
     } catch (e2) {
       if (e2.status === 409 && /START/i.test(e2.message)) await refreshFromServer();

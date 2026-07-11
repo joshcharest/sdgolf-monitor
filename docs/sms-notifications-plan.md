@@ -14,7 +14,7 @@ Tee times at popular San Diego courses get sniped within minutes of appearing. T
 **SMS is added alongside email, never replacing it:**
 
 - **Email stays the authoritative, at-least-once channel.** It carries the full digest, unsubscribe links, and owner Book links, and keeps its retry-next-tick semantics untouched.
-- **SMS is a strictly opt-in, best-effort accelerator** — a one-segment ping ("new tee time, here's the link") for users who explicitly enroll a phone number. If SMS fails, is unconfigured, is quiet-hours suppressed, or a user never opts in, behavior is exactly today's.
+- **SMS is a strictly opt-in, best-effort accelerator** — a one-segment ping ("new tee time, here's the link") for users who explicitly enroll a phone number. If SMS fails, is unconfigured, or a user never opts in, behavior is exactly today's.
 - **Scope: one message type.** Only the new-tee-time digest (the only latency-critical send, `runner.py:139`) gets SMS, plus the single compliance-required opt-in verification text. Welcome, subscribe/create confirmations, bug reports, and autobook notices stay email-only — none is time-sensitive, and every SMS costs real money.
 
 Scale reality check: a handful of friends, low tens of alert emails/day, all recipients in San Diego, current infra cost ~$0/month. The design below is the smallest diff that is compliant, observable, and safe — no queues, no webhooks, no shorteners, no SDKs.
@@ -67,7 +67,7 @@ Why this route (all facts as of 2026-07-10 unless noted):
                                                  │
                                                  │  after all sets (main.py):
                                                  │    sms_queue.flush() ── ≤1 coalesced msg/person ──► POST api.twilio.com …/Messages.json ──► phones
-                                                 │      quiet-hours gate · 8/tick cap · 21610/21211 catch · NEVER raises
+                                                 │      8/tick cap · 21610/21211 catch · NEVER raises
                                                  │    POST /api/internal/sms-optout ──► Worker flips sms:<email> to stopped
                                                  │    outcomes → snapshot; ≥3 consecutive failures → admin email (existing send_bug_report)
                                                  ▼
@@ -106,7 +106,6 @@ Rules: all three are **optional everywhere** — read with `os.environ.get` / `e
 - **SMS never raises.** Enqueue is a dict append (cannot raise); flush wraps every per-recipient send in try/except (clone of the autobook guard, runner.py:174–176). A failed SMS is **dropped, not retried** — the email already delivered the same alert. This protects the map's #1 gotcha: anything raising between diff and `state.save` (runner.py:178) re-fires every *email* next tick.
 - **Missing secrets ⇒ channel off**, run byte-identical to today (one `sms channel disabled (no TWILIO_* secrets)` log line). **Kill switch:** delete the `TWILIO_AUTH_TOKEN` Actions secret — channel vanishes next tick.
 - **Burst safety:** GitHub Actions cache eviction (monitor.yml:31–37) re-alerts every matching slot at once. Coalescing (≤1 text/person/tick) plus `MAX_SMS_PER_TICK = 8` caps the worst tick at ~$0.10; email carries the full list.
-- **Quiet hours:** outside the recipient's window (default 08:00–21:00 America/Los_Angeles; opt-in "early bird" 05:00 start), SMS is **dropped, not deferred** — no stale 2 a.m. tee times delivered at 8 a.m.; email is unaffected. The OTP text is exempt (user-initiated, they're at the screen).
 - **dry_run:** `run_check_set` returns at runner.py:129–131 before any send; `main.py` builds neither `SmtpCreds` nor `SmsCreds`. Zero SMS surface.
 
 ---
@@ -123,7 +122,6 @@ Rules: all three are **optional everywhere** — read with `os.environ.get` / `e
   //          active   = verified — the ONLY status the runner receives
   //          stopped  = texted STOP (carrier-blocked) or number invalid
   //          disabled = turned off via UI, or admin removed the account
-  "window": "standard" | "early_bird",  // quiet-hours preset: 8am–9pm | 5am–9pm PT; recorded at consent time
   "consent": {                          // TCPA/CTIA consent record — the reason this key is never deleted
     "ts": "2026-07-14T18:03:22Z",
     "ip": "…",                          // CF-Connecting-IP at PUT time
@@ -157,11 +155,11 @@ Each config gains, exactly parallel to `recipient_away`:
 
 ```jsonc
 "recipient_sms": {
-  "friend@example.com": { "phone": "+16195551234", "window": "standard" }
+  "friend@example.com": { "phone": "+16195551234" }
 }
 ```
 
-**`status === "active"` records only**, keyed by lowercased email (the strip/lower normalization invariant — worker.js:858–862 / runner.py:216 / notify.py:635). Pending, stopped, and disabled users simply never appear, so the runner *cannot* text an unverified or opted-out number even by bug. Shipping `{phone, window}` from day one avoids a later shape migration.
+**`status === "active"` records only**, keyed by lowercased email (the strip/lower normalization invariant — worker.js:858–862 / runner.py:216 / notify.py:635). Pending, stopped, and disabled users simply never appear, so the runner *cannot* text an unverified or opted-out number even by bug. Shipping `{phone}` as an object (not a bare string) from day one avoids a later shape migration.
 
 ### Opt-in scope: per-user, NOT per-subscription — a deliberate decision
 
@@ -188,13 +186,12 @@ Each bullet ≈ one commit. Python has no new pip dependencies (`requests` and `
 - GSM-7 machinery: `gsm7_len()` counting septets (extension chars `[]{}~^|\€` cost 2), `_to_gsm7()` transliterating/stripping non-GSM chars from user-supplied set names — one emoji must never silently flip the message to 70-char UCS-2 segments at 2–3× cost. Composer output is ASCII-only by construction.
 - `compose_alert(set_name, times, worker_url)` — single-set body: `SDGolf: {slot_line} (+N more) Txt STOP to end {booking_link}` using the earliest slot (same `min()` key as `_subject`, notify.py:685). **Degrade ladder** to guarantee ≤160 GSM-7: drop `" Txt STOP to end"` → drop `" (+N more)"` → swap the provider booking link for the short stable `WORKER_URL`. Belt-and-braces final truncate. No URL shortener — public shorteners are a carrier-filtering red flag.
 - `compose_coalesced(entries, worker_url)` — multi-set body: `SDGolf: {N} new tee times across {M} alerts. {top slot_line} {link}`, same ladder.
-- `within_send_window(window, now)` — `zoneinfo("America/Los_Angeles")`; `standard` = 08:00–21:00, `early_bird` = 05:00–21:00.
-- `SmsQueue` — in-memory per-tick collector: `enqueue(email, phone, window, set_name, times)` (dict append; cannot raise), `flush(creds, worker_url) -> Outcomes`. Flush coalesces per email (≤1 text/person/tick), applies the window gate and `MAX_SMS_PER_TICK = 8` global cap (module counter; each tick is a fresh process), and POSTs per recipient: `requests.post(f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json", data={"To":…, "From":…, "Body":…}, auth=(sid, token), timeout=20)`. On HTTP 400, parse the error code: **21610 → outcome `stopped`**, **21211 → `invalid`**, else logged `error`. Every recipient wrapped in try/except; **flush never raises**. Returns `{sent, skipped_quiet, capped, stopped: [(email, reason)], invalid: […], errors}`.
+- `SmsQueue` — in-memory per-tick collector: `enqueue(email, phone, set_name, times)` (dict append; cannot raise), `flush(creds, worker_url) -> Outcomes`. Flush coalesces per email (≤1 text/person/tick), applies the `MAX_SMS_PER_TICK = 8` global cap (module counter; each tick is a fresh process), and POSTs per recipient: `requests.post(f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json", data={"To":…, "From":…, "Body":…}, auth=(sid, token), timeout=20)`. On HTTP 400, parse the error code: **21610 → outcome `stopped`**, **21211 → `invalid`**, else logged `error`. Every recipient wrapped in try/except; **flush never raises**. Returns `{sent, capped, stopped: [(email, reason)], invalid: […], errors}`.
 
 ### `src/sdgolf_monitor/runner.py` — enqueue at the seam
 
 - `run_check_set` signature (runner.py:29–42): add `sms_queue: SmsQueue | None = None`.
-- New `_recipient_sms_map(cfg)` beside `_recipient_away_set` (runner.py:205–219): parses `cfg["recipient_sms"]` (`{email: {phone, window}}`), `strip().lower()` keys, `None` when absent — identical normalization discipline.
+- New `_recipient_sms_map(cfg)` beside `_recipient_away_set` (runner.py:205–219): parses `cfg["recipient_sms"]` (`{email: {phone}}`), `strip().lower()` keys, `None` when absent — identical normalization discipline.
 - Inside the `else:` branch after `notify.send_email` returns (after runner.py:151, before autobook at :156 and `state.save` at :178): iterate the **same `recipients` list from :135** (pending-confirmation suppression from main.py:137–140 inherited for free); for each, look up the sms entry, compute `_, their_times = notify.slots_for_recipient(addr, new, recipient_away)`, and `sms_queue.enqueue(...)` when both exist. Pure dict mutation — an email-send exception means enqueue never ran; an enqueue can never disturb `state.save`.
 
 ### `src/sdgolf_monitor/main.py` — creds, flush, observability
@@ -210,26 +207,26 @@ Each bullet ≈ one commit. Python has no new pip dependencies (`requests` and `
 
 ### `worker.js` — enrollment, decoration, cleanup (each bullet a commit; all routes added before the ASSETS fallback at worker.js:82)
 
-- `smsKey(email)` / `phoneKey(e164)` helpers (clone `awayKey`, worker.js:381–383) + `GET /api/me/sms` (session-gated via the `handleGetAway` pattern, worker.js:352–357): returns `{status, phone_masked, window}`.
-- `PUT /api/me/sms` (`{phone, window, consent: true}`): normalize US phone → E.164 (strip punctuation; accept 10-digit or 1-prefixed; else 400); require `consent: true`; **409** if `phone:<e164>` maps to a different email; write `sms:<email>` `status=pending` with the full consent record (`CF-Connecting-IP`, `disclosure_version`, url, user_agent, window) + `phone:<e164>`; generate a 6-digit OTP (store `sha256(code+salt)` via `crypto.subtle` — no PBKDF2, respecting the 10ms CPU budget gotcha; 10-min expiry; ≤3 sends/day; ≤5 attempts) and send it via `sendSmsViaTwilio` (below). Re-PUT acts as resend (rate-limited) or phone change (resets to pending).
+- `smsKey(email)` / `phoneKey(e164)` helpers (clone `awayKey`, worker.js:381–383) + `GET /api/me/sms` (session-gated via the `handleGetAway` pattern, worker.js:352–357): returns `{status, phone_masked}`.
+- `PUT /api/me/sms` (`{phone, consent: true}`): normalize US phone → E.164 (strip punctuation; accept 10-digit or 1-prefixed; else 400); require `consent: true`; **409** if `phone:<e164>` maps to a different email; write `sms:<email>` `status=pending` with the full consent record (`CF-Connecting-IP`, `disclosure_version`, url, user_agent) + `phone:<e164>`; generate a 6-digit OTP (store `sha256(code+salt)` via `crypto.subtle` — no PBKDF2, respecting the 10ms CPU budget gotcha; 10-min expiry; ≤3 sends/day; ≤5 attempts) and send it via `sendSmsViaTwilio` (below). Re-PUT acts as resend (rate-limited) or phone change (resets to pending).
 - `sendSmsViaTwilio(env, to, body)`: `fetch` POST to `…/Messages.json`, Basic auth via existing `b64encode` (worker.js:1255–1259), `URLSearchParams` body — Cloudflare's documented SDK-free pattern; **graceful skip-and-warn when `TWILIO_*` unset** (dispatchMonitor pattern, worker.js:104–107); **never added to `authSecretsReady`** (worker.js:394–396).
 - `POST /api/me/sms/verify` (`{code}`): compare via `constantTimeEqStr` (worker.js:1213–1219) against the stored hash; enforce expiry/attempts; on match → `status=active`, `verified_at`, clear `verify`, history event.
 - `DELETE /api/me/sms` ("Turn off texts"): `status=disabled`, `opt_out_reason:"ui"`, `opted_out_at`, history event; **delete `phone:<e164>`**; record retained.
 - `POST /api/internal/sms-optout` (`{email, reason}`): gated by `checkRunnerSecret` (worker.js:951–955); read-mutate-put `sms:<email>` → `status=stopped` (mutation shape mirrors `handleUnsubscribePost`, worker.js:568–573); delete `phone:<e164>`.
-- `handleInternalConfigs` (worker.js:850–880): in the existing `Promise.all` recipients pass that builds `awayByEmail`, also read `sms:<email>` per recipient; attach `cfg.recipient_sms = {email: {phone, window}}` for **active** records only, mirroring the `recipient_away` join at :869–878.
+- `handleInternalConfigs` (worker.js:850–880): in the existing `Promise.all` recipients pass that builds `awayByEmail`, also read `sms:<email>` per recipient; attach `cfg.recipient_sms = {email: {phone}}` for **active** records only, mirroring the `recipient_away` join at :869–878.
 - PII cleanup (closes the orphaned-sibling-key gotcha for the new keys): allow-list removal (worker.js:227–231) and admin reset (worker.js:262–269) additionally flip `sms:<email>` to `disabled` (+`admin` reason, history event) and delete `phone:<e164>`.
 
 ### `ui/` — opt-in surface
 
 - `ui/index.html`: "Texts" nav button beside Away (nav block :29–36); SMS modal `<template>` (four states below); away tooltip copy fix (:31).
 - `ui/app.js`: API fns `apiGetSms/apiPutSms/apiVerifySms/apiDeleteSms` beside `apiGetAway/apiPutAway` (:102–103); module state `USER_SMS` beside `USER_AWAY` (:49), refreshed in `renderList` (:215–220); `openSmsModal` cloned from `openAwayCalendar` (:1228–1355); wire in `setNav` (:116–125); away-modal copy fix (:1265) — "no email alerts" → "no alerts (email or text)", since away days now suppress both channels.
-- Modal states: **(A) not enrolled** — `type=tel` input, window preset `<select>` ("8am–9pm PT (default)" / "Early bird — 5am–9pm PT"), **unchecked** consent checkbox carrying the full disclosure (§6) + `/privacy.html` link, Save disabled until checked; **(B) pending** — 6-digit code input, rate-limited Resend, attempts-remaining copy; **(C) active** — masked number, preset, "Turn off texts"; **(D) stopped** — banner: *"You texted STOP. Text START to +1-8XX-XXX-XXXX, then re-verify here."* (carrier-level opt-out cannot be cleared programmatically; a silent re-enable would 21610 forever).
+- Modal states: **(A) not enrolled** — `type=tel` input, **unchecked** consent checkbox carrying the full disclosure (§6) + `/privacy.html` link, Save disabled until checked; **(B) pending** — 6-digit code input, rate-limited Resend, attempts-remaining copy; **(C) active** — masked number, "Turn off texts"; **(D) stopped** — banner: *"You texted STOP. Text START to +1-8XX-XXX-XXXX, then re-verify here."* (carrier-level opt-out cannot be cleared programmatically; a silent re-enable would 21610 forever).
 - Client phone validation is one regex mirroring the server (acknowledged as the single new client/server mirror). **No SMS body preview anywhere in the UI** — composition stays Python-only (avoids keep-in-sync mirror #6).
 - `ui/privacy.html` — NEW static page (existing ASSETS binding, no build step): what's collected (email, phone, consent timestamp/IP), purpose (tee-time alerts only), the load-bearing TFV sentence that **numbers are never shared with third parties for marketing**, retention statement (consent records kept ≥5 years, surviving account deletion), STOP/HELP instructions, contact email. Deferred polish (post-v1): tour step in `buildTourSteps` (:1366–1445), admin `sms` badge (:1878–1902).
 
 ### `tests/` — beside `tests/test_notify.py`
 
-- `test_sms.py`: composer ≤160 GSM-7 for **every** course in the notify.py course tables with worst-case slots (`Wed 12/31 11:50 AM`, `(+99 more)`) and 25-char unicode set names; degrade-ladder order; septet extension-char costs; ASCII-only output; window boundaries (04:59/05:00/07:59/08:00/20:59/21:00 PT, plus a DST date); 21610/21211 parsing; coalescing (two sets → one body); `MAX_SMS_PER_TICK` cap; flush-never-raises with a raising transport.
+- `test_sms.py`: composer ≤160 GSM-7 for **every** course in the notify.py course tables with worst-case slots (`Wed 12/31 11:50 AM`, `(+99 more)`) and 25-char unicode set names; degrade-ladder order; septet extension-char costs; ASCII-only output; 21610/21211 parsing; coalescing (two sets → one body); `MAX_SMS_PER_TICK` cap; flush-never-raises with a raising transport.
 - Extend `test_runner.py`/`test_notify.py`: `slots_for_recipient` extraction regression (send_email byte-identical); enqueue skipped on dry_run; enqueue never runs when `send_email` raises; empty-recipients tick enqueues nothing.
 
 ---
@@ -237,12 +234,11 @@ Each bullet ≈ one commit. Python has no new pip dependencies (`requests` and `
 ## 6. Opt-in & compliance checklist (per July 2026 research)
 
 - [ ] **Consent tier — prior express consent (PEC) only.** Alerts are purely informational (tee-time facts + booking link, zero promotional content), so TCPA needs PEC, not written consent (Wipfli, 2026-04-28); the user typing their own number into the modal for this stated purpose is the qualifying act. **Message content must stay strictly informational forever** or the consent tier changes.
-- [ ] **Consent capture:** UNCHECKED checkbox with disclosure naming the brand and terms: *"Text me new tee-time alerts from SDGolf Monitor. Message frequency varies. Msg & data rates may apply. Reply STOP to cancel, HELP for help."* + privacy-policy link + quiet-window note ("texts 8am–9pm PT unless you pick Early bird; email always arrives regardless"). Save disabled until checked.
+- [ ] **Consent capture:** UNCHECKED checkbox with disclosure naming the brand and terms: *"Text me new tee-time alerts from SDGolf Monitor. Message frequency varies. Msg & data rates may apply. Reply STOP to cancel, HELP for help."* + privacy-policy link. Save disabled until checked.
 - [ ] **Verification (double opt-in / possession proof):** OTP text sent on enrollment — *"SDGolf Monitor: your code is 482913. Alerts for new tee times; freq varies. Msg&data rates may apply. Reply STOP to opt out, HELP for help."* (~139 GSM-7 chars — carries the CTIA-required first-message disclosures). Code entry flips `pending → active`; **the runner only ever sees `active`** — a typo'd digit can never subscribe a stranger. Not strictly required by TCPA/CTIA, but cheap insurance that also eases verification review.
-- [ ] **Consent records:** timestamp, CF-Connecting-IP, user agent, `disclosure_version` pinning the exact checkbox text, form URL, phone, window preset, plus the full opt-out/verify event history — stored in `sms:<email>`, **retained ≥5 years** (TCPA SoL is 4 years; without records courts effectively presume non-compliance). Survives account deletion; disclosed in `privacy.html`.
+- [ ] **Consent records:** timestamp, CF-Connecting-IP, user agent, `disclosure_version` pinning the exact checkbox text, form URL, phone, plus the full opt-out/verify event history — stored in `sms:<email>`, **retained ≥5 years** (TCPA SoL is 4 years; without records courts effectively presume non-compliance). Survives account deletion; disclosed in `privacy.html`.
 - [ ] **STOP (revocation), four layers, none dependent on our uptime:** (1) Twilio carrier-level auto-handling of STOP/STOPALL/UNSUBSCRIBE/CANCEL/END/QUIT/REVOKE/OPTOUT (last two added 2025-05-13 per FCC) — instant, provider-guaranteed; (2) runner catches 21610 → `/api/internal/sms-optout` → KV truth within one tick; (3) "Turn off texts" in the modal; (4) existing HMAC email-unsubscribe removes the user from a config, stopping *both* channels for that set. All comfortably inside the FCC any-reasonable-means / 10-business-day rule (effective 2025-04-11).
 - [ ] **HELP:** Twilio console auto-response with program name + sdgolfmonitor@gmail.com. Zero code.
-- [ ] **Quiet hours:** default 08:00–21:00 America/Los_Angeles gate on every alert SMS. Legally, consented informational alerts are outside the quiet-hours "telephone solicitation" rule (King v. Bon Charge, D. Del., 2026-04-30) — but 480+ quiet-hours suits since Nov 2024 make the gate the cheapest insurance available. The **early-bird (5am) preset is a recorded express invitation** stored with the consent record — the compliance-clean way to deliver dawn cancellation pings. Suppressed sends are dropped, never deferred.
 - [ ] **Brand identification:** every message starts `SDGolf:` / `SDGolf Monitor:`; `Txt STOP to end` rides in alert bodies whenever the segment budget allows (it's the first ladder drop; the enrollment text always carries it).
 - [ ] **US-only scope:** `+1` E.164 validation hardcoded (all recipients are San Diego friends) — keeps everything inside US TCPA/CTIA and toll-free verification scope.
 - [ ] **Registration evidence coherence:** TFV submission uses the deployed opt-in modal URL + screenshot and `/privacy.html`, with sample messages **matching the real `compose_alert`/OTP strings** — the filing and the code describe the same system.
@@ -295,19 +291,19 @@ Runbook steps 1–5: account, top-up, toll-free number, `privacy.html` deployed,
 
 **Phase 3 — Worker + UI opt-in surface (independent of Twilio approval; OTP send no-ops gracefully until wrangler secrets exist).**
 `/api/me/sms` GET/PUT/verify/DELETE, `sms:`/`phone:` keys with consent records, OTP flow, `/api/internal/sms-optout`, `recipient_sms` decoration, PII cleanup wiring, modal + nav + away-copy fix.
-*Acceptance:* enroll round-trips to `pending` with full consent record (IP/ts/version/window) visible in KV; duplicate phone from a second account → 409; `curl` of `/api/internal/configs` with `RUNNER_SECRET` shows `recipient_sms` **only** for a manually-activated record, lowercased keys; disable deletes `phone:` and retains `sms:` with `opt_out_reason:"ui"`; admin removal flips to `disabled` + deletes `phone:`; login/signup/away/admin regression-free **with no Twilio secrets set**. Once Phase 1 approves and wrangler secrets are set: OTP text arrives <10 s after PUT; correct code flips the modal to active; wrong code ×5 locks until re-request.
+*Acceptance:* enroll round-trips to `pending` with full consent record (IP/ts/version) visible in KV; duplicate phone from a second account → 409; `curl` of `/api/internal/configs` with `RUNNER_SECRET` shows `recipient_sms` **only** for a manually-activated record, lowercased keys; disable deletes `phone:` and retains `sms:` with `opt_out_reason:"ui"`; admin removal flips to `disabled` + deletes `phone:`; login/signup/away/admin regression-free **with no Twilio secrets set**. Once Phase 1 approves and wrangler secrets are set: OTP text arrives <10 s after PUT; correct code flips the modal to active; wrong code ×5 locks until re-request.
 
 **Phase 4 — Runner alert channel (inert until Actions secrets set).**
 `sms.py`, queue + flush, runner enqueue, main.py wiring, snapshot `_sms` counts + UI underscore-skip guard, health email, `monitor.yml` env lines, full test additions.
 *Acceptance:* with `TWILIO_*` unset, a full Actions run is byte-identical to today except one `sms channel disabled` log line; all §5 unit tests green; dry_run builds no creds and sends nothing.
 
 **Phase 5 — Owner canary (Josh only; one secret write, no code).**
-Set the three Actions secrets; Josh opts in via the modal (early-bird preset to test it).
-*Acceptance:* on a real or seeded alert, SMS lands within seconds of the email for the same tick; Twilio console shows `numSegments=1`; booking link opens; **STOP drill** — text STOP → next attempted send logs 21610 → modal shows the stopped banner within one tick; text START + re-verify → delivery restored; a 6:00 a.m. slot with `standard` window → email only + `skipped_quiet` outcome in snapshot; with `early_bird` → text delivered; breaking `TWILIO_AUTH_TOKEN` on purpose → emails unaffected, `error` outcomes in snapshot, admin health email after 3 consecutive failures.
+Set the three Actions secrets; Josh opts in via the modal.
+*Acceptance:* on a real or seeded alert, SMS lands within seconds of the email for the same tick; Twilio console shows `numSegments=1`; booking link opens; **STOP drill** — text STOP → next attempted send logs 21610 → modal shows the stopped banner within one tick; text START + re-verify → delivery restored; breaking `TWILIO_AUTH_TOKEN` on purpose → emails unaffected, `error` outcomes in snapshot, admin health email after 3 consecutive failures.
 
 **Phase 6 — Open to friends + first-month watch.**
 Announce in the group; friends self-enroll (allow-list already gates accounts). Optional polish: tour step, admin `sms` badge.
-*Acceptance:* each friend received exactly one OTP text and reached `active`; per-message cost in the Twilio console matches ~$0.012–0.013; zero sends logged outside each user's window; one friend completes the full STOP → START drill; monthly spend within the §9 estimate.
+*Acceptance:* each friend received exactly one OTP text and reached `active`; per-message cost in the Twilio console matches ~$0.012–0.013; one friend completes the full STOP → START drill; monthly spend within the §9 estimate.
 
 ---
 
@@ -337,7 +333,6 @@ Announce in the group; friends self-enroll (allow-list already gates accounts). 
 | **Actions cache eviction re-alert storm** (monitor.yml:31–37) — per-message billing meets a full re-alert burst | Coalescing (≤1/person/tick) + `MAX_SMS_PER_TICK=8` ⇒ worst tick ≈ $0.10; email carries the full list |
 | **Duplicate SMS on partial failure** — email-then-crash before `state.save` re-fires both channels next tick (same at-least-once semantics email has today) | Accepted: rare, bounded to one duplicate per incident, pennies; a duplicate tee-time text is annoying, not harmful |
 | **Carrier filtering of `workers.dev` links** | Direct provider booking links preferred (declared in TFV samples — lowest-risk option); ladder falls back to the stable WORKER_URL; escape hatches: custom domain, or link-less bodies ("details in email"). Watch delivery status in Phase 5 |
-| **Quiet-hours drop (not defer) loses overnight discoveries** — a 11 p.m. cancellation for a 6 a.m. slot is emailed, never texted | Disclosed in modal copy; early-bird preset covers the dawn window golfers actually care about; a defer queue is deliberately out of scope |
 | **Phone PII lifecycle** — `sms:<email>` outlives account deletion | By design (5-yr TCPA consent retention), disclosed in `privacy.html`; the routable `phone:<e164>` key is deleted on every opt-out path; open question #3 offers a phone-nulling variant |
 | **KV eventual consistency / 5-min tick lag on UI opt-out** | Carrier STOP is instant regardless; UI-toggle lag ≤1 tick, orders of magnitude inside the 10-business-day FCC bound |
 | **Dual-homed Twilio creds rotation drift** | Exact precedent is `RUNNER_SECRET`; README documents the two-step rotation |
@@ -346,9 +341,8 @@ Announce in the group; friends self-enroll (allow-list already gates accounts). 
 
 ## Open questions for Josh
 
-1. **Quiet-hours presets:** v1 ships "8am–9pm PT (default)" and "Early bird (5am–9pm PT)". Want a third "Anytime" option? (Max snipe coverage, but 2 a.m. texts and the weakest posture against the quiet-hours suit wave.)
-2. **Sole-prop filing comfort:** TFV uses your personal name + home address as the business identity. OK? And if TFV rejects, should the 10DLC SP fallback (~$19–20.50 one-time, OTP to your mobile) proceed automatically or wait for your go-ahead?
-3. **PII retention:** keep the full phone number in `sms:<email>` ≥5 years post-deletion (strongest TCPA audit posture, as planned and disclosed), or null the phone on admin deletion and keep only the consent/opt-out event log?
-4. **Spend guardrails:** is the alert-only $15/mo usage trigger + 8/tick cap enough, or do you want a hard monthly cap enforced by the runner (e.g. `SDGOLF_SMS_MONTHLY_CAP`)?
-5. **Future message types:** stay digest-only, or add the autobook notice (owner-only) as the first SMS fast-follow?
-6. **Custom domain:** pre-register one for booking-link fallback resilience, or wait for evidence of `workers.dev` filtering in Phase 5?
+1. **Sole-prop filing comfort:** TFV uses your personal name + home address as the business identity. OK? And if TFV rejects, should the 10DLC SP fallback (~$19–20.50 one-time, OTP to your mobile) proceed automatically or wait for your go-ahead?
+2. **PII retention:** keep the full phone number in `sms:<email>` ≥5 years post-deletion (strongest TCPA audit posture, as planned and disclosed), or null the phone on admin deletion and keep only the consent/opt-out event log?
+3. **Spend guardrails:** is the alert-only $15/mo usage trigger + 8/tick cap enough, or do you want a hard monthly cap enforced by the runner (e.g. `SDGOLF_SMS_MONTHLY_CAP`)?
+4. **Future message types:** stay digest-only, or add the autobook notice (owner-only) as the first SMS fast-follow?
+5. **Custom domain:** pre-register one for booking-link fallback resilience, or wait for evidence of `workers.dev` filtering in Phase 5?
