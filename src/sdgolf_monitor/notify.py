@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import smtplib
 import time
 from datetime import date, datetime
@@ -17,13 +18,22 @@ from .client import TeeTime
 from .golfdistrict import booking_url as _golfdistrict_booking_url
 from .webtrac import booking_url as _webtrac_booking_url
 
-# Display name for every outgoing email; the address is whatever account
-# GMAIL_USERNAME authenticates as.
+# Display name for every outgoing email.
 SENDER_NAME = "SDGolf Monitor"
 
 
 def _from_header(smtp_user: str) -> str:
-    return formataddr((SENDER_NAME, smtp_user))
+    """From header: ``SDGolf Monitor <address>``.
+
+    The address defaults to the authenticated account (GMAIL_USERNAME) but
+    can be overridden with GMAIL_FROM_ADDRESS so alerts come from the
+    dedicated support address instead of the personal account doing the
+    sending. Gmail only honors a From that differs from the login when it's
+    a verified "Send mail as" alias on that account — otherwise it silently
+    rewrites the header back to the login address.
+    """
+    from_addr = os.environ.get("GMAIL_FROM_ADDRESS", "").strip() or smtp_user
+    return formataddr((SENDER_NAME, from_addr))
 
 # 90 days is long enough that anyone who saved an old email can still click
 # through, but short enough that a leaked URL eventually stops working.

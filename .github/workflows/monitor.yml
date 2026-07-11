@@ -42,6 +42,10 @@ jobs:
           SDGOLF_PASSWORD: ${{ secrets.SDGOLF_PASSWORD }}
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          # From address shown to recipients; empty/unset falls back to
+          # GMAIL_USERNAME. Must be a verified "Send mail as" alias on the
+          # authenticating account or Gmail rewrites it back.
+          GMAIL_FROM_ADDRESS: ${{ secrets.GMAIL_FROM_ADDRESS }}
           WORKER_URL: https://sdgolf-monitor.joshcharest1.workers.dev
           RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
           # Tunnel all ForeUp HTTP through the Worker's egress instead of the

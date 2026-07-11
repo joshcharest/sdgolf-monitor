@@ -5,6 +5,22 @@ from __future__ import annotations
 from sdgolf_monitor import notify
 
 
+def test_from_header_defaults_to_smtp_user(monkeypatch):
+    monkeypatch.delenv("GMAIL_FROM_ADDRESS", raising=False)
+    assert notify._from_header("personal@gmail.com") == "SDGolf Monitor <personal@gmail.com>"
+
+
+def test_from_header_honors_override(monkeypatch):
+    monkeypatch.setenv("GMAIL_FROM_ADDRESS", "sdgolfmonitor@gmail.com")
+    assert notify._from_header("personal@gmail.com") == "SDGolf Monitor <sdgolfmonitor@gmail.com>"
+
+
+def test_from_header_blank_override_falls_back(monkeypatch):
+    # An unset repo secret reaches the workflow env as an empty string.
+    monkeypatch.setenv("GMAIL_FROM_ADDRESS", "  ")
+    assert notify._from_header("personal@gmail.com") == "SDGolf Monitor <personal@gmail.com>"
+
+
 def test_booking_url_teeitup_coronado():
     url = notify._booking_url("Coronado (3-14d)", "2026-06-06")
     assert url == (

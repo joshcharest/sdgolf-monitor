@@ -33,8 +33,9 @@ A web UI for managing check sets is also published to GitHub Pages.
    |---|---|
    | `SDGOLF_USERNAME` | your sdgolf.com login |
    | `SDGOLF_PASSWORD` | your sdgolf.com password |
-   | `GMAIL_USERNAME` | sender email address |
+   | `GMAIL_USERNAME` | Gmail account that sends the email (SMTP login) |
    | `GMAIL_APP_PASSWORD` | 16-char Gmail app password |
+   | `GMAIL_FROM_ADDRESS` | (optional) From address shown to recipients, e.g. a dedicated support account; defaults to `GMAIL_USERNAME`. Must be a verified "Send mail as" alias on the `GMAIL_USERNAME` account, or Gmail silently rewrites the From back to the login address |
    | `NOTIFY_TO` | where alerts go |
 
 3. **Enable Actions** — the `monitor` workflow runs every 5 minutes.
