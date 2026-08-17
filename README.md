@@ -49,6 +49,8 @@ https://sdgolf-monitor.joshcharest1.workers.dev/.
    npx wrangler deploy
    ```
 
+   Or run the `deploy` workflow from the Actions tab, which does the same
+   thing with the repo's `CF_API_TOKEN` (needs "Workers Scripts: Edit").
    The UI is then served at
    `https://sdgolf-monitor.joshcharest1.workers.dev/`. Unlike the Actions
    secrets above, the Worker's secrets are set with
