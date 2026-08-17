@@ -1,11 +1,20 @@
 name: monitor
 
 on:
-  # A Cloudflare Worker cron hits the GitHub dispatch API every 5 min
-  # (see worker.js scheduled handler). GH's own schedule: trigger drifts
-  # by hours under load, so we don't use it. Manual gh workflow run still
-  # works as a self-heal if the Worker is ever broken.
+  # Primary trigger: a Cloudflare Worker cron hits the GitHub dispatch API
+  # every 5 min (see worker.js scheduled handler), because GH's own
+  # schedule: trigger drifts by hours under load. Manual gh workflow run
+  # still works as a self-heal if the Worker is ever broken.
   workflow_dispatch: {}
+
+  # Backstop only. The Worker's dispatch dies silently if GH_DISPATCH_TOKEN
+  # expires or the Worker breaks — without this, monitoring just stops with
+  # nothing but a 401 in the Worker log. GH's own schedule drifts by hours,
+  # so */30 buys a coarse safety net without fighting the 5-min Worker cron
+  # (the `monitor` concurrency group queues rather than duplicates). Note GH
+  # disables scheduled workflows after 60 days with no repo activity.
+  schedule:
+    - cron: "*/30 * * * *"
 
 concurrency:
   group: monitor
