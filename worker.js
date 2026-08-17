@@ -1,7 +1,8 @@
 // Cloudflare Worker entry. Responsibilities:
 //   - GET  /api/snapshot                       latest tee-time snapshot from KV
+//   - GET  /api/health                         snapshot freshness (503 = stale)
 //   - POST /api/dispatch                       trigger an immediate monitor run
-//   - POST /api/auth/signup                    create account (gated by INVITE_CODE)
+//   - POST /api/auth/signup                    create account (gated by allow list)
 //   - POST /api/auth/login                     exchange email+password -> session
 //   - POST /api/auth/logout                    clear session cookie
 //   - GET  /api/me                             return signed-in user or 401
@@ -26,6 +27,7 @@ export default {
     const method = request.method;
 
     if (pathname === "/api/snapshot") return handleSnapshot(env);
+    if (pathname === "/api/health") return handleHealth(env);
     if (pathname === "/api/dispatch" && method === "POST") {
       const ok = await dispatchMonitor(env);
       return new Response(null, { status: ok ? 204 : 502 });
@@ -106,6 +108,40 @@ async function handleSnapshot(env) {
   return new Response(value, {
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
+}
+
+// A published snapshot older than this means the pipeline stopped: expired
+// GH_DISPATCH_TOKEN, a missed Worker cron, failing runs, or a provider that
+// broke. The cron fires every 5 min and a run takes ~90s, so 20 min is four
+// missed ticks — long enough that a single slow run never trips it.
+const SNAPSHOT_STALE_AFTER_SEC = 20 * 60;
+
+// Liveness for the whole chain, not just this Worker: it reports whether
+// fresh tee-time data actually exists. 503 when stale so a plain uptime
+// pinger flags it too. Public and secret-free — it exposes one timestamp
+// the /api/snapshot payload already carries.
+async function handleHealth(env) {
+  if (!env.SNAPSHOT_KV) {
+    return json({ ok: false, stale: true, error: "SNAPSHOT_KV binding not configured" }, 503);
+  }
+  const raw = await env.SNAPSHOT_KV.get("snapshot");
+  let generatedAt = null;
+  if (raw) {
+    try { generatedAt = JSON.parse(raw)?.generated_at ?? null; } catch { /* corrupt blob */ }
+  }
+  const parsed = generatedAt ? Date.parse(generatedAt) : NaN;
+  // Unparseable or absent counts as stale — "we don't know" is not healthy.
+  const ageSec = Number.isNaN(parsed)
+    ? null
+    : Math.max(0, Math.round((Date.now() - parsed) / 1000));
+  const stale = ageSec === null || ageSec > SNAPSHOT_STALE_AFTER_SEC;
+  return json({
+    ok: !stale,
+    stale,
+    generated_at: generatedAt,
+    age_seconds: ageSec,
+    stale_after_seconds: SNAPSHOT_STALE_AFTER_SEC,
+  }, stale ? 503 : 200);
 }
 
 async function dispatchMonitor(env) {

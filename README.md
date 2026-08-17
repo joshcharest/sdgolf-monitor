@@ -7,12 +7,13 @@ and resales (via the Golf District marketplace) — on a schedule and emails
 you when a new slot matching your filter shows up. Designed to run as a
 GitHub Actions cron job — no servers, no AWS, no browser.
 
-A web UI for managing check sets is also published to GitHub Pages.
+A web UI for managing check sets is served by the Cloudflare Worker at
+https://sdgolf-monitor.joshcharest1.workers.dev/.
 
 ## How it works
 
 1. **One ForeUp login per cron run**, JWT captured from the SPA's auth call.
-2. **Every YAML under `configs/`** is treated as one "check set" — its own
+2. **Every check set the Worker serves** (from Cloudflare KV) has its own
    targets, date range, time windows, and filter criteria.
 3. **For each check set**, the runner fetches tee times across the date
    range, filters to matches, diffs against `state/<set-name>.json`, and
@@ -37,36 +38,74 @@ A web UI for managing check sets is also published to GitHub Pages.
    | `GMAIL_APP_PASSWORD` | 16-char Gmail app password |
    | `NOTIFY_TO` | where alerts go |
 
-3. **Enable Actions** — the `monitor` workflow runs every 5 minutes.
-4. **Host the UI on Cloudflare Pages** (free, supports private repos):
-   1. Visit https://dash.cloudflare.com/ → Workers &amp; Pages → Create →
-      Pages → Connect to Git.
-   2. Authorize Cloudflare to read this repo only.
-   3. Create project. **Build settings**: framework preset = *None*,
-      build command = leave empty, build output directory = `ui`.
-   4. Deploy. The UI is then served at
-      `https://sdgolf-monitor.pages.dev/`. Cloudflare auto-redeploys
-      on every push to `main` that touches `ui/**`.
+3. **Enable Actions** — a Worker cron dispatches the `monitor` workflow
+   every 5 minutes, with a `schedule:` backstop every 30 minutes in case
+   that dispatch breaks.
+4. **Deploy the Worker**, which is both the API and the web host — the
+   `assets` binding in `wrangler.jsonc` serves `ui/` straight from the
+   Worker, so there is no separate Pages project:
 
-   The UI never leaves the Cloudflare CDN; nothing in your repo becomes
-   public. The UI talks directly to `api.github.com` from your browser
-   using a PAT you paste in once (saved to localStorage).
+   ```bash
+   npx wrangler deploy
+   ```
+
+   The UI is then served at
+   `https://sdgolf-monitor.joshcharest1.workers.dev/`. Unlike the Actions
+   secrets above, the Worker's secrets are set with
+   `npx wrangler secret put <NAME>` — see "Worker secrets" below.
+
+   This repo is public, so treat everything committed here as readable by
+   anyone. Nothing sensitive lives in it: credentials are GitHub Actions
+   secrets and Worker secrets (never committed, `.env` is gitignored), and
+   all user data — accounts, check sets, SMS enrollments — lives in
+   Cloudflare KV rather than in the tree.
+
+   The browser only ever talks to this Worker's own `/api/*` endpoints —
+   never to `api.github.com`. Auth is an HttpOnly session cookie the Worker
+   sets on login/signup, so no tokens live in localStorage.
+
+## Worker secrets
+
+Set with `npx wrangler secret put <NAME>`; they take effect immediately, no
+redeploy. Separate from the Actions secrets above — the runner and the
+Worker each hold their own.
+
+| Secret | Purpose |
+|---|---|
+| `GH_DISPATCH_TOKEN` | Fine-grained PAT (**Actions: read & write** on this repo) the cron uses to trigger `monitor.yml`. If it lapses, every check stops and the only symptom is silence — see "Caveats". |
+| `SESSION_SECRET` | Signs the `sdgolf_session` cookie. |
+| `PASSWORD_PEPPER` | Pepper mixed into PBKDF2 password hashes. |
+| `ALLOWED_EMAILS` | Bootstrap signup allow list; once an admin saves a list, KV `allowed_emails` takes over. |
+| `ADMIN_EMAILS` | Comma-separated admins (manage the allow list, autobook, bug reports). |
+| `RUNNER_SECRET` | Bearer token for `/api/internal/*`, and the signing key for unsubscribe + one-click booking links. Must match the Actions secret of the same name. |
+| `AUTOBOOK_OWNER_EMAIL` | App-side email of whoever owns the ForeUp account autobook would charge. |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM_NUMBER` | Optional. Unset means SMS degrades to email-only; it never breaks auth. |
+
+`INVITE_CODE` is still set on the deployment but nothing reads it — signup
+is gated by the allow list. Safe to delete.
 
 ## Managing check sets
 
 ### Via the web UI (recommended)
 
-1. Open the published Pages URL.
-2. First visit: paste a fine-grained personal access token scoped to this
-   single repo with **Contents: read & write**. Saved to localStorage; only
-   sent to `api.github.com`.
-3. Each YAML in `configs/` shows as a card. Toggle enabled, click to edit,
-   or "＋ New check set" to create one. Save commits the YAML back to `main`
-   directly.
+1. Open the published UI URL.
+2. First visit: sign up with an email + password. Signup is gated by an
+   allow list — KV key `allowed_emails`, bootstrapped from the
+   `ALLOWED_EMAILS` Worker secret and managed by admins after that — so an
+   address the admin hasn't added gets a 403.
+3. Each check set shows as a card. Toggle enabled, click to edit, or
+   "＋ New check set" to create one. Save writes the config to Cloudflare KV
+   (`config:<id>`) via the Worker's `/api/configs` endpoints; the monitor run
+   reads them back from `/api/internal/configs`. Nothing is committed to the
+   repo.
 
-### Via direct YAML editing
+### Check-set schema
 
-`configs/<name>.yaml`:
+KV is the source of truth for check sets; the `configs/*.yaml` files are the
+pre-KV originals, kept as readable examples of the field schema (the KV
+records hold the same fields as JSON). Editing them does nothing — a run
+reads only what the Worker serves. See `scripts/migrate_configs_to_kv.py`
+for the one-shot YAML → KV migration.
 
 ```yaml
 enabled: true
@@ -91,8 +130,8 @@ filter:
     - { start: "15:00", end: "18:30", weekdays: [mon, tue, wed, thu, fri] }
 ```
 
-The filename (without `.yaml`) is the set name used in logs and the email
-subject. Lowercase + hyphens recommended.
+In these files the filename (without `.yaml`) was the set name used in logs
+and the email subject; KV records carry that as a `name` field instead.
 
 ### Discovering your booking classes
 
@@ -126,6 +165,15 @@ pytest
 
 ## Caveats
 
+- **The monitor fails silently.** Every layer degrades quietly: an expired
+  `GH_DISPATCH_TOKEN`, a missed Worker cron, or a failing run all produce
+  the same symptom — no email — which is indistinguishable from a day when
+  no tee times opened up. This happened on 2026-08-16: the dispatch token
+  hit its 90-day expiry and nothing ran for five hours. Two guards now
+  exist: the `schedule:` backstop in `monitor.yml`, and the `heartbeat`
+  workflow, which checks `/api/health` every 30 minutes and emails the
+  admins when the published snapshot goes stale. Check liveness by hand
+  with `curl <worker>/api/health` — it answers 503 when stale.
 - ForeUp's API is undocumented and could change. The integration relies on
   the JWT + `Api-Key: no_limits` shape the SPA uses today.
 - The booking-class IDs and pricing are San Diego-specific. Other ForeUp
