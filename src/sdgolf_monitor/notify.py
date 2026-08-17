@@ -373,6 +373,75 @@ def _welcome_html(signup_url: str) -> str:
     )
 
 
+def send_stale_alert(
+    *,
+    smtp_user: str,
+    smtp_password: str,
+    to_addrs: list[str],
+    health: dict,
+    worker_url: str,
+) -> None:
+    """Email the admin list when the Worker reports a stale snapshot.
+
+    Every other failure in this system announces itself; a dead monitor is
+    silent, because "no alerts" is indistinguishable from "no tee times
+    opened up". This is the only message that turns that silence into
+    something you notice, so it deliberately says what to check rather than
+    just reporting a number.
+    """
+    if not to_addrs:
+        return
+    age_sec = health.get("age_seconds")
+    age_text = _duration(age_sec) if isinstance(age_sec, (int, float)) else "unknown"
+    generated_at = health.get("generated_at") or "never"
+    msg = EmailMessage()
+    msg["From"] = _from_header(smtp_user)
+    msg["To"] = ", ".join(to_addrs)
+    msg["Subject"] = f"[sdgolf:down] No tee-time checks for {age_text}"
+    msg.set_content(
+        "The monitor has stopped publishing fresh tee-time data.\n"
+        "\n"
+        f"Last successful run:  {generated_at}\n"
+        f"Age:                  {age_text}\n"
+        f"Stale threshold:      {_duration(health.get('stale_after_seconds'))}\n"
+        "\n"
+        "No alerts are going out. Nothing is being checked. Likely causes,\n"
+        "in rough order of how often they bite:\n"
+        "\n"
+        "  1. GH_DISPATCH_TOKEN expired or was revoked — the Worker cron\n"
+        "     can no longer trigger the monitor workflow. Check the Worker\n"
+        "     log for 'dispatch failed: 401'.\n"
+        "  2. The monitor workflow is failing — check the Actions run log.\n"
+        "  3. A tee-sheet provider changed their API and the scraper broke.\n"
+        "  4. The Cloudflare cron did not fire, or a bad deploy broke the\n"
+        "     scheduled handler.\n"
+        "\n"
+        "Check the live status:\n"
+        f"  {worker_url.rstrip('/')}/api/health\n"
+        "  https://github.com/joshcharest/sdgolf-monitor/actions/workflows/monitor.yml\n"
+        "\n"
+        "To force a run once the cause is fixed:\n"
+        f"  curl -X POST {worker_url.rstrip('/')}/api/dispatch    (expect 204)\n"
+    )
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
+        smtp.login(smtp_user, smtp_password)
+        smtp.send_message(msg, to_addrs=to_addrs)
+
+
+def _duration(seconds: float | int | None) -> str:
+    """Humanise a second count: '4h 52m', '35m', '50s'."""
+    if seconds is None:
+        return "unknown"
+    total = int(seconds)
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m"
+    return f"{secs}s"
+
+
 def send_bug_report(
     *,
     smtp_user: str,
