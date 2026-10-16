@@ -144,24 +144,60 @@ async function handleHealth(env) {
   }, stale ? 503 : 200);
 }
 
+// GitHub disables scheduled workflows in a public repo after 60 days with no
+// commits, and a disabled workflow also rejects workflow_dispatch (422). That
+// silently stops every check. GH_DISPATCH_TOKEN already has Actions: write,
+// which is all the enable endpoint needs, so the cron re-enables and retries.
+const GH_REPO_API = "https://api.github.com/repos/joshcharest/sdgolf-monitor";
+const SCHEDULED_WORKFLOWS = ["monitor.yml", "heartbeat.yml"];
+
+function ghHeaders(env) {
+  return {
+    "Authorization": `Bearer ${env.GH_DISPATCH_TOKEN}`,
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "sdgolf-monitor-cron",
+  };
+}
+
+async function postDispatch(env) {
+  return fetch(`${GH_REPO_API}/actions/workflows/monitor.yml/dispatches`, {
+    method: "POST",
+    headers: ghHeaders(env),
+    body: JSON.stringify({ ref: "main" }),
+  });
+}
+
+async function enableWorkflows(env) {
+  for (const wf of SCHEDULED_WORKFLOWS) {
+    const resp = await fetch(`${GH_REPO_API}/actions/workflows/${wf}/enable`, {
+      method: "PUT",
+      headers: ghHeaders(env),
+    });
+    if (resp.status === 204) {
+      console.log(`re-enabled ${wf}`);
+    } else {
+      console.error(`enable ${wf} failed:`, resp.status, await resp.text());
+    }
+  }
+}
+
 async function dispatchMonitor(env) {
   if (!env.GH_DISPATCH_TOKEN) {
     console.error("GH_DISPATCH_TOKEN not configured — skipping dispatch");
     return false;
   }
-  const resp = await fetch(
-    "https://api.github.com/repos/joshcharest/sdgolf-monitor/actions/workflows/monitor.yml/dispatches",
-    {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.GH_DISPATCH_TOKEN}`,
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "sdgolf-monitor-cron",
-      },
-      body: JSON.stringify({ ref: "main" }),
-    },
-  );
+  let resp = await postDispatch(env);
+  if (resp.status === 422) {
+    const body = await resp.text();
+    if (!/disabled/i.test(body)) {
+      console.error("dispatch failed:", resp.status, body);
+      return false;
+    }
+    console.error("monitor workflow is disabled; re-enabling:", body);
+    await enableWorkflows(env);
+    resp = await postDispatch(env);
+  }
   if (resp.status !== 204) {
     console.error("dispatch failed:", resp.status, await resp.text());
     return false;
