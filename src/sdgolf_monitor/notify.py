@@ -22,8 +22,36 @@ from .webtrac import booking_url as _webtrac_booking_url
 SENDER_NAME = "SDGolf Monitor"
 
 
+# Stamped on every outgoing email so mail rules (e.g. Outlook's "Message header
+# includes") can route by message kind without relying on subject wording,
+# which has changed before and will again.
+KIND_HEADER = "X-SDGolf-Kind"
+
+
 def _from_header(smtp_user: str) -> str:
     return formataddr((SENDER_NAME, smtp_user))
+
+
+def _new_message(smtp_user: str, kind: str) -> EmailMessage:
+    """Start an outgoing email with the shared From and kind headers.
+
+    Parameters
+    ----------
+    smtp_user : str
+        Sending account address.
+    kind : str
+        Message kind: ``alert``, ``autobook``, ``down``, ``bug``,
+        ``welcome`` or ``confirmation``.
+
+    Returns
+    -------
+    EmailMessage
+        Message with ``From`` and ``X-SDGolf-Kind`` already set.
+    """
+    msg = EmailMessage()
+    msg["From"] = _from_header(smtp_user)
+    msg[KIND_HEADER] = kind
+    return msg
 
 # 90 days is long enough that anyone who saved an old email can still click
 # through, but short enough that a leaked URL eventually stops working.
@@ -256,8 +284,7 @@ def send_autobook_email(
     + confirmation number.
     """
     prefix = "AUTO-BOOK (dry run)" if dry_run else "AUTO-BOOK"
-    msg = EmailMessage()
-    msg["From"] = _from_header(smtp_user)
+    msg = _new_message(smtp_user, "autobook")
     msg["To"] = to_addr
     msg["Subject"] = (
         f"[sdgolf:{set_name}] {prefix} — {_fmt_date(slot.date)} {_fmt_12h(slot.time)} {slot.target}"
@@ -330,8 +357,7 @@ def send_welcome_email(
     """
     if not to_addr:
         return
-    msg = EmailMessage()
-    msg["From"] = _from_header(smtp_user)
+    msg = _new_message(smtp_user, "welcome")
     msg["To"] = to_addr
     msg["Subject"] = "[sdgolf] You've been added to sdgolf-monitor"
     msg.set_content(_welcome_plaintext(signup_url))
@@ -394,8 +420,7 @@ def send_stale_alert(
     age_sec = health.get("age_seconds")
     age_text = _duration(age_sec) if isinstance(age_sec, (int, float)) else "unknown"
     generated_at = health.get("generated_at") or "never"
-    msg = EmailMessage()
-    msg["From"] = _from_header(smtp_user)
+    msg = _new_message(smtp_user, "down")
     msg["To"] = ", ".join(to_addrs)
     msg["Subject"] = f"[sdgolf:down] No tee-time checks for {age_text}"
     msg.set_content(
@@ -455,8 +480,7 @@ def send_bug_report(
     reporter = bug.get("email", "?")
     description = bug.get("description", "(none)")
     short_desc = description.splitlines()[0][:80] if description else "(none)"
-    msg = EmailMessage()
-    msg["From"] = _from_header(smtp_user)
+    msg = _new_message(smtp_user, "bug")
     msg["To"] = ", ".join(to_addrs)
     msg["Subject"] = f"[sdgolf:bug] {reporter}: {short_desc}"
     msg.set_content(_bug_plaintext(bug))
@@ -553,8 +577,7 @@ def send_confirmation_email(
         _unsubscribe_url(worker_url, unsubscribe_secret, to_addr, cfg.get("id", ""))
         if action == "subscribe" else None
     )
-    msg = EmailMessage()
-    msg["From"] = _from_header(smtp_user)
+    msg = _new_message(smtp_user, "confirmation")
     msg["To"] = to_addr
     msg["Subject"] = f"[sdgolf:{set_name}] You {verb} {set_name}"
     _set_list_unsubscribe(msg, unsub)
@@ -725,8 +748,7 @@ def send_email(
             # Only the owner sees the "Book now" link — subscribers wouldn't be
             # able to redeem it anyway (worker checks owner-account match).
             urls_for_recipient = book_urls if is_owner else None
-            msg = EmailMessage()
-            msg["From"] = _from_header(smtp_user)
+            msg = _new_message(smtp_user, "alert")
             msg["To"] = addr
             msg["Subject"] = _subject(set_name, their_times)
             _set_list_unsubscribe(msg, unsub)

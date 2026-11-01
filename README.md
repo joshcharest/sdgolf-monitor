@@ -20,8 +20,12 @@ https://sdgolf-monitor.joshcharest1.workers.dev/.
    emails a digest if there's anything new. State lives in the GitHub
    Actions cache (keyed `state-*`) so dedup persists across runs without
    polluting git history.
-4. **Email subjects are tagged** `[sdgolf:<set-name>]` so Gmail filters can
-   route each check set independently.
+4. **Every email carries an `X-SDGolf-Kind` header** (`alert`, `autobook`,
+   `down`, `bug`, `welcome`, `confirmation`) and comes from the
+   `GMAIL_USERNAME` account, so mail rules can route alerts without
+   depending on subject wording. Outlook: *Message header includes*
+   `X-SDGolf-Kind: alert`. Gmail can't filter on custom headers; filter on
+   the sender address instead.
 
 ## Setup
 
