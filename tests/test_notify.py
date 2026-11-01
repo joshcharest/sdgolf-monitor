@@ -57,3 +57,46 @@ def test_html_tags_golfdistrict_resale():
     html = notify._html([tt])
     assert "jcresorts.golfdistrict.com" in html
     assert "(resale)" in html
+
+
+class _FakeSmtp:
+    """Stand-in for smtplib.SMTP_SSL that records sent messages."""
+
+    sent: list = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def login(self, *args):
+        pass
+
+    def send_message(self, msg, **kwargs):
+        _FakeSmtp.sent.append(msg)
+
+
+def test_alert_and_welcome_carry_kind_header(monkeypatch):
+    from sdgolf_monitor.client import TeeTime
+
+    _FakeSmtp.sent = []
+    monkeypatch.setattr(notify.smtplib, "SMTP_SSL", _FakeSmtp)
+    tt = TeeTime(
+        target="Balboa Park 18", date="2026-06-06", time="07:30",
+        available_spots=4, holes=18, green_fee=40.0, booking_fee=None,
+    )
+    notify.send_email(
+        smtp_user="bot@example.com", smtp_password="x",
+        to_addrs=["a@example.com"], set_name="Weekend", new_times=[tt],
+    )
+    notify.send_welcome_email(
+        smtp_user="bot@example.com", smtp_password="x",
+        to_addr="a@example.com", signup_url="https://example.com",
+    )
+    kinds = [m[notify.KIND_HEADER] for m in _FakeSmtp.sent]
+    assert kinds == ["alert", "welcome"]
+    assert "SDGolf Monitor" in _FakeSmtp.sent[0]["From"]
